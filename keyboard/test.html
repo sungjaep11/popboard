@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PopBoard 키보드 테스트 — MacKenzie phrase set</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232c; --line:#2b3440;
+    --fg:#e6edf3; --dim:#8b98a5; --dimmer:#5c6773;
+    --ok:#3fb950; --bad:#f85149; --accent:#58a6ff; --warn:#d29922;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--fg);
+    font:14px/1.5 var(--mono);
+    padding:18px; max-width:1180px; margin:0 auto;
+  }
+  h1{font-size:15px;margin:0;font-weight:600;letter-spacing:.02em}
+  h1 span{color:var(--dim);font-weight:400}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+  .hint{color:var(--dimmer);font-size:12px}
+
+  /* ── 통계 ─────────────────────────────────────────── */
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:8px;margin-bottom:14px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
+  .stat .k{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em}
+  .stat .v{font-size:21px;font-variant-numeric:tabular-nums;margin-top:2px}
+  .stat .v small{font-size:11px;color:var(--dim)}
+
+  /* ── 타이핑 테스트 ────────────────────────────────── */
+  .test{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:22px 24px;margin-bottom:12px}
+  .test.done{border-color:var(--ok)}
+  #phrase{font-size:26px;line-height:1.7;letter-spacing:.01em;word-break:break-word;white-space:pre-wrap}
+  #phrase .c{border-radius:2px}
+  #phrase .pending{color:var(--dimmer)}
+  #phrase .correct{color:var(--ok)}
+  #phrase .wrong{color:var(--bad);background:rgba(248,81,73,.16);text-decoration:underline}
+  #phrase .wrong.sp{background:rgba(248,81,73,.35)}
+  #phrase .extra{color:var(--bad);opacity:.75}
+  #phrase .caret{border-left:2px solid var(--accent);margin-left:-2px;animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{border-color:transparent}}
+
+  /* 실제로 친 글자. 위 목표 문장과 세로로 맞아야 하므로 폰트·크기·자간을 동일하게
+     둔다. 최대 43자라 26px에서도 줄바꿈이 없어 열이 어긋나지 않는다. */
+  #typed{
+    font-size:26px;line-height:1.7;letter-spacing:.01em;white-space:pre-wrap;
+    word-break:break-word;min-height:1.7em;
+    margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);
+  }
+  #typed .tok{color:var(--dim)}
+  #typed .tbad{color:var(--bad);background:rgba(248,81,73,.22);border-radius:2px;font-weight:700}
+  #typed .tbad.sp{background:rgba(248,81,73,.5)}
+  #typed .ph{font-size:13px;color:var(--dimmer);letter-spacing:0}
+  .meta{display:flex;gap:16px;margin-top:16px;font-size:12px;color:var(--dim);flex-wrap:wrap}
+  #m-hint{display:none;color:var(--ok);font-weight:600}
+  .test.done #m-hint{display:inline}
+
+  /* ── 컨트롤 ───────────────────────────────────────── */
+  .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:18px}
+  button{
+    font:inherit;font-size:12px;background:var(--panel2);color:var(--fg);
+    border:1px solid var(--line);border-radius:6px;padding:6px 12px;cursor:pointer;
+  }
+  button:hover{border-color:var(--dim)}
+  button:active{background:var(--line)}
+  label.chk{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dim);cursor:pointer}
+  .sep{flex:1}
+
+  /* ── 키보드 ───────────────────────────────────────── */
+  .kbwrap{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;margin-bottom:12px;overflow-x:auto}
+  svg{display:block;width:100%;min-width:640px;height:auto}
+  .kcap{fill:var(--panel2);stroke:var(--line);stroke-width:.5}
+  .kcap.ghost{fill:none;stroke:var(--dimmer);stroke-width:.4;stroke-dasharray:2 1.6}
+  .kcap.lit{fill:var(--accent);stroke:var(--accent)}
+  .kcap.ghostlit{fill:rgba(210,153,34,.55);stroke:var(--warn);stroke-dasharray:none}
+  .klbl{fill:var(--fg);font-size:5px;text-anchor:middle;dominant-baseline:central;font-family:var(--mono);pointer-events:none}
+  .klbl.ghost{fill:var(--dimmer);font-size:4px}
+  .klbl.lit{fill:#0e1116;font-weight:700}
+  .sensor{fill:rgba(88,166,255,.06);stroke:var(--accent);stroke-width:.4;stroke-dasharray:3 2}
+  .sensorlbl{fill:var(--accent);font-size:4px;font-family:var(--mono)}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font-size:11px;color:var(--dim);margin-top:12px}
+  .legend i{display:inline-block;width:16px;height:9px;border-radius:2px;vertical-align:-1px;margin-right:5px}
+
+  /* ── 이벤트 로그 ──────────────────────────────────── */
+  .box{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+  .box h2{font-size:11px;margin:0 0 8px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+  #log{font-size:11.5px;line-height:1.7;height:190px;overflow-y:auto}
+  #log div{display:flex;gap:10px;white-space:nowrap}
+  #log .t{color:var(--dimmer);width:70px;text-align:right;flex:none}
+  #log .d{color:var(--ok);width:38px;flex:none}
+  #log .u{color:var(--dimmer);width:38px;flex:none}
+  #log .code{color:var(--accent);width:110px;flex:none;overflow:hidden;text-overflow:ellipsis}
+  #log .rep{color:var(--warn)}
+  #log .unmapped{color:var(--bad)}
+  footer{color:var(--dimmer);font-size:11px;margin-top:16px;line-height:1.7}
+  code{background:var(--panel2);padding:1px 5px;border-radius:3px;color:var(--fg)}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>PopBoard 키보드 테스트 <span>— MacKenzie phrase set (500)</span></h1>
+  <span class="hint">아무 키나 누르면 시작. 문장을 다 치면 <b>스페이스</b>로 다음 문장.</span>
+</header>
+
+<div class="stats">
+  <div class="stat"><div class="k">WPM</div><div class="v" id="s-wpm">–</div></div>
+  <div class="stat"><div class="k">정확도</div><div class="v" id="s-acc">–</div></div>
+  <div class="stat"><div class="k">세션 평균 WPM</div><div class="v" id="s-avg">–</div></div>
+  <div class="stat"><div class="k">완료 문장</div><div class="v" id="s-done">0</div></div>
+  <div class="stat"><div class="k">키스트로크</div><div class="v" id="s-ks">0</div></div>
+  <div class="stat"><div class="k">백스페이스</div><div class="v" id="s-bs">0</div></div>
+  <div class="stat"><div class="k">미매핑 키</div><div class="v" id="s-unmapped">0</div></div>
+</div>
+
+<div class="test" id="test"><div id="phrase"></div>
+  <div id="typed"></div>
+  <div class="meta">
+    <span id="m-idx"></span>
+    <span id="m-time">0.00 s</span>
+    <span id="m-len"></span>
+    <span id="m-hint">␣ 스페이스 → 다음 문장 &nbsp;·&nbsp; ⌫ 백스페이스 → 되돌아가 수정</span>
+  </div>
+</div>
+
+<div class="controls">
+  <button id="btn-next">다음 문장 →</button>
+  <button id="btn-retry">현재 문장 다시</button>
+  <button id="btn-reset">세션 리셋</button>
+  <label class="chk"><input type="checkbox" id="opt-lower" checked> 소문자 정규화</label>
+  <label class="chk"><input type="checkbox" id="opt-rand" checked> 무작위 순서</label>
+  <div class="sep"></div>
+  <span class="hint">기기엔 Enter/Esc가 없어 조작은 이 버튼으로</span>
+</div>
+
+<div class="kbwrap">
+  <svg id="kb" viewBox="-6 -8 299 106" role="img" aria-label="PopBoard 물리 키 배열"></svg>
+  <div class="legend">
+    <span><i style="background:var(--panel2);border:1px solid var(--line)"></i>keymap.h에 매핑됨</span>
+    <span><i style="background:var(--accent)"></i>지금 눌림</span>
+    <span><i style="background:none;border:1px dashed var(--dimmer)"></i>오버레이엔 있으나 미매핑</span>
+    <span><i style="background:rgba(210,153,34,.55);border:1px solid var(--warn)"></i>미매핑 키가 눌림(= 다른 키보드 입력)</span>
+    <span><i style="background:rgba(88,166,255,.10);border:1px dashed var(--accent)"></i>Sensel 감지영역</span>
+  </div>
+</div>
+
+<div class="box">
+  <h2>Raw 키 이벤트 <span class="hint">(event.code / HID 매핑 검증용)</span></h2>
+  <div id="log"></div>
+</div>
+
+<script>
+"use strict";
+
+/* ══ MacKenzie & Soukoreff phrase set (yorku.ca/mack/phrases2.txt) ══ */
+const PHRASES = [
+  "my watch fell in the water", "prevailing wind from the east", "never too rich and never too thin", "breathing is difficult",
+  "I can see the rings on Saturn", "physics and chemistry are hard", "my bank account is overdrawn", "elections bring out the best",
+  "we are having spaghetti", "time to go shopping", "a problem with the engine", "elephants are afraid of mice",
+  "my favorite place to visit", "three two one zero blast off", "my favorite subject is psychology", "circumstances are unacceptable",
+  "watch out for low flying objects", "if at first you do not succeed", "please provide your date of birth", "we run the risk of failure",
+  "prayer in schools offends some", "he is just like everyone else", "great disturbance in the force", "love means many things",
+  "you must be getting old", "the world is a stage", "can I skate with sister today", "neither a borrower nor a lender be",
+  "one heck of a question", "question that must be answered", "beware the ides of March", "double double toil and trouble",
+  "the power of denial", "I agree with you", "do not say anything", "play it again Sam",
+  "the force is with you", "you are not a jedi yet", "an offer you cannot refuse", "are you talking to me",
+  "yes you are very smart", "all work and no play", "hair gel is very greasy", "Valium in the economy size",
+  "the facts get in the way", "the dreamers of dreams", "did you have a good time", "space is a high priority",
+  "you are a wonderful example", "do not squander your time", "do not drink too much", "take a coffee break",
+  "popularity is desired by all", "the music is better than it sounds", "starlight and dewdrop", "the living is easy",
+  "fish are jumping", "the cotton is high", "drove my chevy to the levee", "but the levee was dry",
+  "I took the rover from the shop", "movie about a nutty professor", "come and see our new car", "coming up with killer sound bites",
+  "I am going to a music lesson", "the opposing team is over there", "soon we will return from the city", "I am wearing a tie and a jacket",
+  "the quick brown fox jumped", "all together in one big pile", "wear a crown with many jewels", "there will be some fog tonight",
+  "I am allergic to bees and peanuts", "he is still on our team", "the dow jones index has risen", "my preferred treat is chocolate",
+  "the king sends you to the tower", "we are subjects and must obey", "mom made her a turtleneck", "goldilocks and the three bears",
+  "we went grocery shopping", "the assignment is due today", "what you see is what you get", "for your information only",
+  "a quarter of a century", "the store will close at ten", "head shoulders knees and toes", "vanilla flavored ice cream",
+  "frequently asked questions", "round robin scheduling", "information super highway", "my favorite web browser",
+  "the laser printer is jammed", "all good boys deserve fudge", "the second largest country", "call for more details",
+  "just in time for the party", "have a good weekend", "video camera with a zoom lens", "what a monkey sees a monkey will do",
+  "that is very unfortunate", "the back yard of our house", "this is a very good idea", "reading week is just about here",
+  "our fax number has changed", "thank you for your help", "no exchange without a bill", "the early bird gets the worm",
+  "buckle up for safety", "this is too much to handle", "protect your environment", "world population is growing",
+  "the library is closed today", "Mary had a little lamb", "teaching services will help", "we accept personal checks",
+  "this is a non profit organization", "user friendly interface", "healthy food is good for you", "hands on experience with a job",
+  "this watch is too expensive", "the postal service is very slow", "communicate through email", "the capital of our nation",
+  "travel at the speed of light", "I do not fully agree with you", "gas bills are sent monthly", "earth quakes are predictable",
+  "life is but a dream", "take it to the recycling depot", "sent this by registered mail", "fall is my favorite season",
+  "a fox is a very smart animal", "the kids are very excited", "parking lot is full of trucks", "my bike has a flat tire",
+  "do not walk too quickly", "a duck quacks to ask for food", "limited warranty of two years", "the four seasons will come",
+  "the sun rises in the east", "it is very windy today", "do not worry about this", "dashing through the snow",
+  "want to join us for lunch", "stay away from strangers", "accompanied by an adult", "see you later alligator",
+  "make my day you sucker", "I can play much better now", "she wears too much makeup", "my bare face in the wind",
+  "batman wears a cape", "I hate baking pies", "lydia wants to go home", "win first prize in the contest",
+  "freud wrote of the ego", "I do not care if you do that", "always cover all the bases", "nobody cares anymore",
+  "can we play cards tonight", "get rid of that immediately", "I watched blazing saddles", "the sum of the parts",
+  "they love to yap about nothing", "peek out the window", "be home before midnight", "he played a pimp in that movie",
+  "I skimmed through your proposal", "he was wearing a sweatshirt", "no more war no more bloodshed", "toss the ball around",
+  "I will meet you at noon", "I want to hold your hand", "the children are playing", "superman never wore a mask",
+  "I listen to the tape everyday", "he is shouting loudly", "correct your diction immediately", "seasoned golfers love the game",
+  "he cooled off after she left", "my dog sheds his hair", "join us on the patio", "these cookies are so amazing",
+  "I can still feel your presence", "the dog will bite you", "a most ridiculous thing", "where did you get that tie",
+  "what a lovely red jacket", "do you like to shop on Sunday", "I spilled coffee on the carpet", "the largest of the five oceans",
+  "shall we play a round of cards", "olympic athletes use drugs", "my mother makes good cookies", "do a good deed to someone",
+  "quick there is someone knocking", "flashing red light means stop", "sprawling subdivisions are bad", "where did I leave my glasses",
+  "on the way to the cottage", "a lot of chlorine in the water", "do not drink the water", "my car always breaks in the winter",
+  "santa claus got stuck", "public transit is much faster", "zero in on the facts", "make up a few more phrases",
+  "my fingers are very cold", "rain rain go away", "bad for the environment", "universities are too expensive",
+  "the price of gas is high", "the winner of the race", "we drive on parkways", "we park in driveways",
+  "go out for some pizza and beer", "effort is what it will take", "where can my little dog be", "if you were not so stupid",
+  "not quite so smart as you think", "do you like to go camping", "this person is a disaster", "the imagination of the nation",
+  "universally understood to be wrong", "listen to five hours of opera", "an occasional taste of chocolate", "victims deserve more redress",
+  "the protesters blocked all traffic", "the acceptance speech was boring", "work hard to reach the summit", "a little encouragement is needed",
+  "stiff penalty for staying out late", "the pen is mightier than the sword", "exceed the maximum speed limit", "in sharp contrast to your words",
+  "this leather jacket is too warm", "consequences of a wrong turn", "this mission statement is baloney", "you will loose your voice",
+  "every apple from every tree", "are you sure you want this", "the fourth edition was better", "this system of taxation",
+  "beautiful paintings in the gallery", "a yard is almost as a meter", "we missed your birthday", "coalition governments never work",
+  "destruction of the rain forest", "I like to play tennis", "acutely aware of her good looks", "you want to eat your cake",
+  "machinery is too complicated", "a glance in the right direction", "I just cannot figure this out", "please follow the guidelines",
+  "an airport is a very busy place", "mystery of the lost lagoon", "is there any indication of this", "the chamber makes important decisions",
+  "this phenomenon will never occur", "obligations must be met first", "valid until the end of the year", "file all complaints in writing",
+  "tickets are very expensive", "a picture is worth many words", "this camera takes nice photographs", "it looks like a shack",
+  "the dog buried the bone", "the daring young man", "this equation is too complicated", "express delivery is very fast",
+  "I will put on my glasses", "a touchdown in the last minute", "the treasury department is broke", "a good response to the question",
+  "well connected with people", "the bathroom is good for reading", "the generation gap gets wider", "chemical spill took forever",
+  "prepare for the exam in advance", "interesting observation was made", "bank transaction was not registered", "your etiquette needs some work",
+  "we better investigate this", "stability of the nation", "house with new electrical panel", "our silver anniversary is coming",
+  "the presidential suite is very busy", "the punishment should fit the crime", "sharp cheese keeps the mind sharp", "the registration period is over",
+  "you have my sympathy", "the objective of the exercise", "historic meeting without a result", "very reluctant to enter",
+  "good at addition and subtraction", "six daughters and seven sons", "a thoroughly disgusting thing to say", "sign the withdrawal slip",
+  "relations are very strained", "the minimum amount of time", "a very traditional way to dress", "the aspirations of a nation",
+  "medieval times were very hard", "a security force of eight thousand", "there are winners and losers", "the voters turfed him out",
+  "pay off a mortgage for a house", "the collapse of the Roman empire", "did you see that spectacular explosion", "keep receipts for all your expenses",
+  "the assault took six months", "get your priorities in order", "traveling requires a lot of fuel", "longer than a football field",
+  "a good joke deserves a good laugh", "the union will go on strike", "never mix religion and politics", "interactions between men and women",
+  "where did you get such a silly idea", "it should be sunny tomorrow", "a psychiatrist will help you", "you should visit to a doctor",
+  "you must make an appointment", "the fax machine is broken", "players must know all the rules", "a dog is the best friend of a man",
+  "would you like to come to my house", "February has an extra day", "do not feel too bad about it", "this library has many books",
+  "construction makes traveling difficult", "he called seven times", "that is a very odd question", "a feeling of complete exasperation",
+  "we must redouble our efforts", "no kissing in the library", "that agreement is rife with problems", "vote according to your conscience",
+  "my favourite sport is racketball", "sad to hear that news", "the gun discharged by accident", "one of the poorest nations",
+  "the algorithm is too complicated", "your presentation was inspiring", "that land is owned by the government", "burglars never leave their business card",
+  "the fire blazed all weekend", "if diplomacy does not work", "please keep this confidential", "the rationale behind the decision",
+  "the cat has a pleasant temperament", "our housekeeper does a thorough job", "her majesty visited our country", "handicapped persons need consideration",
+  "these barracks are big enough", "sing the gospel and the blues", "he underwent triple bypass surgery", "the ropes of a new organization",
+  "peering through a small hole", "rapidly running short on words", "it is difficult to concentrate", "give me one spoonful of coffee",
+  "two or three cups of coffee", "just like it says on the can good", "companies announce a merger", "electric cars need big fuel cells",
+  "the plug does not fit the socket", "drugs should be avoided", "the most beautiful sunset", "we dine out on the weekends",
+  "get aboard the ship is leaving", "the water was monitored daily", "he watched in astonishment", "a big scratch on the tabletop",
+  "salesmen must make their monthly quota", "saving that child was an heroic effort", "granite is the hardest of all rocks", "bring the offenders to justice",
+  "every Saturday he folds the laundry", "careless driving results in a fine", "microscopes make small things look big", "a coupon for a free sample",
+  "fine but only in moderation", "a subject one can really enjoy", "important for political parties", "that sticker needs to be validated",
+  "the fire raged for an entire month", "one never takes too many precautions", "we have enough witnesses", "labour unions know how to organize",
+  "people blow their horn a lot", "a correction had to be published", "I like baroque and classical music", "the proprietor was unavailable",
+  "be discreet about your meeting", "meet tomorrow in the lavatory", "suburbs are sprawling up everywhere", "shivering is one way to keep warm",
+  "dolphins leap high out of the water", "try to enjoy your maternity leave", "the ventilation system is broken", "dinosaurs have been extinct for ages",
+  "an inefficient way to heat a house", "the bus was very crowded", "an injustice is committed every day", "the coronation was very exciting",
+  "look in the syllabus for the course", "rectangular objects have four sides", "prescription drugs require a note", "the insulation is not working",
+  "nothing finer than discovering a treasure", "our life expectancy has increased", "the cream rises to the top", "the high waves will swamp us",
+  "the treasurer must balance her books", "completely sold out of that", "the location of the crime", "the chancellor was very boring",
+  "the accident scene is a shrine for fans", "a tumor is OK provided it is benign", "please take a bath this month", "rent is paid at the beginning of the month",
+  "for murder you get a long prison sentence", "a much higher risk of getting cancer", "quit while you are ahead", "knee bone is connected to the thigh bone",
+  "safe to walk the streets in the evening", "luckily my wallet was found", "one hour is allotted for questions", "so you think you deserve a raise",
+  "they watched the entire movie", "good jobs for those with education", "jumping right out of the water", "the trains are always late",
+  "sit at the front of the bus", "do you prefer a window seat", "the food at this restaurant", "Canada has ten provinces",
+  "the elevator door appears to be stuck", "raindrops keep falling on my head", "spill coffee on the carpet", "an excellent way to communicate",
+  "with each step forward", "faster than a speeding bullet", "wishful thinking is fine", "nothing wrong with his style",
+  "arguing with the boss is futile", "taking the train is usually faster", "what goes up must come down", "be persistent to win a strike",
+  "presidents drive expensive cars", "the stock exchange dipped", "why do you ask silly questions", "that is a very nasty cut",
+  "what to do when the oil runs dry", "learn to walk before you run", "insurance is important for bad drivers", "traveling to conferences is fun",
+  "do you get nervous when you speak", "pumping helps if the roads are slippery", "parking tickets can be challenged", "apartments are too expensive",
+  "find a nearby parking spot", "gun powder must be handled with care", "just what the doctor ordered", "a rattle snake is very poisonous",
+  "weeping willows are found near water", "I cannot believe I ate the whole thing", "the biggest hamburger I have ever seen", "gamblers eventually loose their shirts",
+  "exercise is good for the mind", "irregular verbs are the hardest to learn", "they might find your comment offensive", "tell a lie and your nose will grow",
+  "an enlarged nose suggests you are a liar", "lie detector tests never work", "do not lie in court or else", "most judges are very honest",
+  "only an idiot would lie in court", "important news always seems to be late", "please try to be home before midnight", "if you come home late the doors are locked",
+  "dormitory doors are locked at midnight", "staying up all night is a bad idea", "you are a capitalist pig", "motivational seminars make me sick",
+  "questioning the wisdom of the courts", "rejection letters are discouraging", "the first time he tried to swim", "that referendum asked a silly question",
+  "a steep learning curve in riding a unicycle", "a good stimulus deserves a good response", "everybody looses in custody battles", "put garbage in an abandoned mine",
+  "employee recruitment takes a lot of effort", "experience is hard to come by", "everyone wants to win the lottery", "the picket line gives me the chills"
+];
+
+/* ══ 물리 배열 ═══════════════════════════════════════════════════════
+   mapped[]  : keymap.h의 KEYS[]와 1:1 (cx, cy, hx, hy 그대로)
+   ghost[]   : QWERTY.pdf 오버레이엔 있지만 keymap.h에 없는 키.
+               각 행이 15u(=286.5mm)로 딱 떨어지고 Q=2u, A=2.25u, Z=2.75u,
+               SPACE=3.75~10u가 실측값과 일치해 표준 u-그리드로 복원했다.
+   ─────────────────────────────────────────────────────────────────── */
+const U = 19.1;
+
+// Sensel Morph의 "감지영역"은 230 x 130 mm다 (240 x 139는 기기 외형 치수).
+// CAL_OX = -18.8 이므로 이 좌표계에서 감지영역은 x = 18.8 ~ 248.8.
+// 이 값이 맞다는 근거: keymap.h가 쓰는 x 범위가 20.6("1"의 왼쪽 모서리) ~
+// 247.5(BACKSPACE의 오른쪽 모서리)라 좌우 여백이 1.8 / 1.3 mm로 딱 떨어진다.
+// 240으로 잡으면 오른쪽만 11.3mm가 남아 캘리브레이션이 한쪽으로 쏠린 꼴이 된다.
+const SENSOR_W  = 230;
+const SENSOR_X0 = 18.8, SENSOR_X1 = SENSOR_X0 + SENSOR_W;
+
+const mapped = [
+  ['1','Digit1',28.7,9.4,8.1,8.1],  ['2','Digit2',47.8,9.4,8.1,8.1],
+  ['3','Digit3',66.9,9.4,8.1,8.1],  ['4','Digit4',86.0,9.4,8.1,8.1],
+  ['5','Digit5',105.1,9.4,8.1,8.1], ['6','Digit6',124.2,9.4,8.1,8.1],
+  ['7','Digit7',143.2,9.4,8.1,8.1], ['8','Digit8',162.4,9.4,8.1,8.1],
+  ['9','Digit9',181.5,9.4,8.1,8.1], ['0','Digit0',200.6,9.4,8.1,8.1],
+  ['⌫ BKSP','Backspace',229.3,9.4,18.2,8.1],
+  ['Q','KeyQ',38.2,28.2,8.1,8.1],   ['W','KeyW',57.3,28.2,8.1,8.1],
+  ['E','KeyE',76.4,28.2,8.1,8.1],   ['R','KeyR',95.5,28.2,8.1,8.1],
+  ['T','KeyT',114.6,28.2,8.1,8.1],  ['Y','KeyY',133.7,28.2,8.1,8.1],
+  ['U','KeyU',152.8,28.2,8.1,8.1],  ['I','KeyI',171.9,28.2,8.1,8.1],
+  ['O','KeyO',191.0,28.2,8.1,8.1],  ['P','KeyP',210.1,28.2,8.1,8.1],
+  ['A','KeyA',43.0,47.0,8.1,8.1],   ['S','KeyS',62.1,47.0,8.1,8.1],
+  ['D','KeyD',81.2,47.0,8.1,8.1],   ['F','KeyF',100.3,47.0,8.1,8.1],
+  ['G','KeyG',119.4,47.0,8.1,8.1],  ['H','KeyH',138.5,47.0,8.1,8.1],
+  ['J','KeyJ',157.6,47.0,8.1,8.1],  ['K','KeyK',176.7,47.0,8.1,8.1],
+  ['L','KeyL',195.8,47.0,8.1,8.1],
+  ['Z','KeyZ',52.5,65.8,8.1,8.1],   ['X','KeyX',71.6,65.8,8.1,8.1],
+  ['C','KeyC',90.7,65.8,8.1,8.1],   ['V','KeyV',109.8,65.8,8.1,8.1],
+  ['B','KeyB',128.9,65.8,8.1,8.1],  ['N','KeyN',148.0,65.8,8.1,8.1],
+  ['M','KeyM',167.1,65.8,8.1,8.1],
+  ['SPACE','Space',130.7,84.6,59.7,7.5],
+];
+
+// code=null: 매핑된 키가 이미 그 code를 쓰고 있어 하이라이트 대상에서 뺀 것
+const ghost = [
+  ['`','Backquote',9.6,9.4,9.55,8.1],   ['⌫ (원래 위치)',null,267.4,9.4,19.1,8.1],
+  ['TAB','Tab',14.3,28.2,14.32,8.1],    ['[','BracketLeft',229.2,28.2,9.55,8.1],
+  [']','BracketRight',248.3,28.2,9.55,8.1], ['\\','Backslash',272.2,28.2,14.32,8.1],
+  ['CAPS','CapsLock',16.7,47.0,16.71,8.1],  [';','Semicolon',214.9,47.0,9.55,8.1],
+  ["'",'Quote',234.0,47.0,9.55,8.1],    ['⏎ RETURN','Enter',265.0,47.0,21.49,8.1],
+  ['⇧ SHIFT','ShiftLeft',21.5,65.8,21.49,8.1], [',','Comma',186.2,65.8,9.55,8.1],
+  ['.','Period',205.3,65.8,9.55,8.1],   ['/','Slash',224.4,65.8,9.55,8.1],
+  ['⇧ SHIFT','ShiftRight',260.2,65.8,26.26,8.1],
+  ['CTRL','ControlLeft',11.9,84.6,11.94,7.5], ['WIN','MetaLeft',35.8,84.6,11.94,7.5],
+  ['ALT','AltLeft',59.7,84.6,11.94,7.5],['ALT','AltRight',203.0,84.6,11.94,7.5],
+  ['WIN','MetaRight',226.8,84.6,11.94,7.5], ['MENU','ContextMenu',250.7,84.6,11.94,7.5],
+  ['CTRL','ControlRight',274.6,84.6,11.94,7.5],
+];
+
+/* ══ 키보드 SVG 그리기 ══════════════════════════════════════════════ */
+const NS = 'http://www.w3.org/2000/svg';
+const svg = document.getElementById('kb');
+const capByCode = new Map();   // code -> [rect, text, isGhost]
+
+function el(tag, attrs){
+  const n = document.createElementNS(NS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  return n;
+}
+
+// 감지영역 밴드 먼저 (키 밑에 깔린다)
+svg.appendChild(el('rect', {x:SENSOR_X0, y:-4, width:SENSOR_X1-SENSOR_X0, height:98,
+                            rx:1.5, class:'sensor'}));
+const sl = el('text', {x:SENSOR_X0+2, y:-5, class:'sensorlbl'});
+sl.textContent = `Sensel Morph 감지영역`;
+svg.appendChild(sl);
+
+function drawKey(label, code, cx, cy, hx, hy, isGhost){
+  const g = el('g', {});
+  const r = el('rect', {x:cx-hx, y:cy-hy, width:hx*2, height:hy*2, rx:1.4,
+                        class:'kcap' + (isGhost ? ' ghost' : '')});
+  const t = el('text', {x:cx, y:cy, class:'klbl' + (isGhost ? ' ghost' : '')});
+  t.textContent = label;
+  if (isGhost){
+    const ov = Math.max(0, Math.min(cx+hx, SENSOR_X1) - Math.max(cx-hx, SENSOR_X0));
+    const ti = el('title', {});
+    ti.textContent = `${label} — 센서 내 폭 ${ov.toFixed(1)} / ${(hx*2).toFixed(1)} mm`;
+    g.appendChild(ti);
+  }
+  g.appendChild(r); g.appendChild(t);
+  svg.appendChild(g);
+  if (code && !capByCode.has(code)) capByCode.set(code, [r, t, isGhost]);
+}
+
+ghost.forEach(k  => drawKey(k[0], k[1], k[2], k[3], k[4], k[5], true));
+mapped.forEach(k => drawKey(k[0], k[1], k[2], k[3], k[4], k[5], false));
+
+const mappedCodes = new Set(mapped.map(k => k[1]));
+
+/* ══ 타이핑 테스트 ══════════════════════════════════════════════════ */
+const $ = id => document.getElementById(id);
+const optLower = $('opt-lower'), optRand = $('opt-rand');
+
+let order = [], cursor = 0;      // 문장 순서
+let target = '', typed = '';
+let tStart = 0, tLast = 0;       // 첫/마지막 키다운 (ms)
+let locked = false;              // 완료 후 자동 전환 대기
+let session = { wpm: [], acc: [], keystrokes: 0, backspaces: 0, unmapped: 0 };
+
+function shuffled(n){
+  const a = Array.from({length:n}, (_,i) => i);
+  for (let i = n-1; i > 0; i--){ const j = (Math.random()*(i+1))|0; [a[i],a[j]] = [a[j],a[i]]; }
+  return a;
+}
+function buildOrder(){
+  order = optRand.checked ? shuffled(PHRASES.length) : Array.from({length:PHRASES.length},(_,i)=>i);
+  cursor = 0;
+}
+function loadPhrase(){
+  const raw = PHRASES[order[cursor % order.length]];
+  target = optLower.checked ? raw.toLowerCase() : raw;
+  typed = ''; tStart = 0; tLast = 0; locked = false;
+  $('test').classList.remove('done');
+  render();
+}
+function nextPhrase(){ cursor++; loadPhrase(); }
+
+function render(){
+  const p = $('phrase');
+  p.textContent = '';
+  const n = Math.max(target.length, typed.length);
+  for (let i = 0; i < n; i++){
+    const s = document.createElement('span');
+    s.className = 'c';
+    if (i >= target.length){                       // 목표보다 길게 친 부분
+      s.classList.add('extra');
+      s.textContent = typed[i] === ' ' ? '␣' : typed[i];
+    } else if (i >= typed.length){
+      s.classList.add('pending');
+      s.textContent = target[i];
+    } else if (typed[i] === target[i]){
+      s.classList.add('correct');
+      s.textContent = target[i];
+    } else {
+      s.classList.add('wrong');
+      if (target[i] === ' ') s.classList.add('sp');
+      s.textContent = target[i];
+    }
+    if (i === typed.length) s.classList.add('caret');
+    p.appendChild(s);
+  }
+  if (typed.length >= n){                          // 캐럿이 맨 끝일 때
+    const s = document.createElement('span');
+    s.className = 'c caret'; s.textContent = ' ';
+    p.appendChild(s);
+  }
+
+  // 실제로 친 글자를 아래 줄에 그대로 보여준다. 위 줄은 목표 문장이라 틀렸을 때
+  // "무엇을 쳤는지"가 안 보이기 때문. 두 줄은 같은 폰트·크기라 열이 맞는다.
+  const tv = $('typed');
+  tv.textContent = '';
+  if (!typed.length){
+    const s = document.createElement('span');
+    s.className = 'ph';
+    s.textContent = '(입력한 글자가 여기 표시됩니다)';
+    tv.appendChild(s);
+  }
+  for (let i = 0; i < typed.length; i++){
+    const s = document.createElement('span');
+    const ok = typed[i] === target[i];
+    s.className = ok ? 'tok' : 'tbad';
+    if (!ok && typed[i] === ' ') s.classList.add('sp');   // 잘못 친 공백도 보이게
+    s.textContent = typed[i];
+    tv.appendChild(s);
+  }
+
+  $('m-idx').textContent  = `문장 ${(cursor % order.length) + 1} / ${PHRASES.length}`;
+  $('m-len').textContent  = `${typed.length} / ${target.length} 자`;
+  updateStats();
+}
+
+function elapsed(){ return tStart ? (tLast - tStart) / 1000 : 0; }
+
+function curWPM(){
+  const s = elapsed();
+  if (s <= 0 || typed.length < 2) return null;
+  return ((typed.length - 1) / s) * 60 / 5;
+}
+function curACC(){
+  if (!typed.length) return null;
+  let ok = 0;
+  const n = Math.min(typed.length, target.length);
+  for (let i = 0; i < n; i++) if (typed[i] === target[i]) ok++;
+  return ok / Math.max(typed.length, target.length);
+}
+
+function updateStats(){
+  const w = curWPM(), a = curACC();
+  $('s-wpm').innerHTML = w === null ? '–' : w.toFixed(1);
+  $('s-acc').innerHTML = a === null ? '–' : (a*100).toFixed(1) + '<small> %</small>';
+  $('m-time').textContent = elapsed().toFixed(2) + ' s';
+  const avg = session.wpm.length
+    ? session.wpm.reduce((x,y)=>x+y,0) / session.wpm.length : null;
+  $('s-avg').innerHTML = avg === null ? '–' : avg.toFixed(1);
+  $('s-done').textContent = session.wpm.length;
+  $('s-ks').textContent = session.keystrokes;
+  $('s-bs').textContent = session.backspaces;
+  $('s-unmapped').textContent = session.unmapped;
+}
+
+// 문장을 다 침. 여기서 세션에 기록하지 않는다 — 백스페이스로 되돌아가 고칠 수
+// 있으므로, 스페이스로 실제 넘어가는 순간의 최종 입력으로 기록한다.
+function completePhrase(){
+  locked = true;
+  $('test').classList.add('done');
+  updateStats();
+}
+function commitPhrase(){
+  const w = curWPM(), a = curACC();
+  if (w !== null) session.wpm.push(w);
+  if (a !== null) session.acc.push(a);
+}
+
+/* ══ 키 이벤트 ══════════════════════════════════════════════════════ */
+const logEl = $('log');
+let logT0 = 0;
+
+function log(e, isDown){
+  if (!logT0) logT0 = e.timeStamp;
+  const d = document.createElement('div');
+  const unmapped = !mappedCodes.has(e.code);
+  d.innerHTML =
+    `<span class="t">${((e.timeStamp - logT0)/1000).toFixed(3)}</span>` +
+    `<span class="${isDown ? 'd' : 'u'}">${isDown ? '▼ DN' : '△ UP'}</span>` +
+    `<span class="code ${unmapped ? 'unmapped' : ''}">${e.code || '?'}</span>` +
+    `<span>${JSON.stringify(e.key)}</span>` +
+    (e.repeat ? '<span class="rep">repeat</span>' : '');
+  logEl.insertBefore(d, logEl.firstChild);
+  while (logEl.childNodes.length > 160) logEl.removeChild(logEl.lastChild);
+}
+
+function light(code, on){
+  const c = capByCode.get(code);
+  if (!c) return;
+  const [r, t, isGhost] = c;
+  r.classList.toggle(isGhost ? 'ghostlit' : 'lit', on);
+  t.classList.toggle('lit', on && !isGhost);
+}
+
+addEventListener('keydown', e => {
+  // 브라우저 단축키(F5, Cmd/Ctrl 조합, 개발자도구)는 그대로 통과시킨다
+  if (e.metaKey || e.ctrlKey || e.altKey || /^F\d+$/.test(e.key)) { log(e, true); return; }
+  e.preventDefault();
+
+  light(e.code, true);
+  log(e, true);
+  if (!mappedCodes.has(e.code)) session.unmapped++;
+  session.keystrokes++;
+
+  // 문장을 다 친 상태. 스페이스로 넘어가고, 백스페이스로 되돌아가 수정한다.
+  // 넘어가는 스페이스는 tLast를 갱신하지 않는다 — 입력 시간에 들어가면 안 된다.
+  if (locked){
+    if (e.key === ' '){
+      commitPhrase();
+      nextPhrase();
+    } else if (e.key === 'Backspace'){
+      locked = false;
+      $('test').classList.remove('done');
+      tLast = performance.now();
+      typed = typed.slice(0, -1);
+      session.backspaces++;
+      render();
+    }
+    return;
+  }
+
+  const now = performance.now();
+  if (!tStart) tStart = now;
+  tLast = now;
+
+  if (e.key === 'Backspace'){
+    typed = typed.slice(0, -1);
+    session.backspaces++;
+  } else if (e.key.length === 1){
+    typed += optLower.checked ? e.key.toLowerCase() : e.key;
+  } else {
+    updateStats();
+    return;   // Shift/Enter/Tab 등은 로그만 남기고 입력엔 반영 안 함
+  }
+
+  render();
+  if (typed.length >= target.length) completePhrase();
+}, {passive:false});
+
+addEventListener('keyup', e => { light(e.code, false); log(e, false); });
+addEventListener('blur', () => capByCode.forEach((_, c) => light(c, false)));
+
+/* ══ 컨트롤 ═════════════════════════════════════════════════════════ */
+// 다 친 뒤에 누르면 스페이스와 똑같이 기록하고 넘어간다. 아직 덜 쳤으면 그냥 건너뛴다.
+$('btn-next').onclick  = () => { if (locked) commitPhrase(); nextPhrase(); };
+$('btn-retry').onclick = () => { loadPhrase(); };
+$('btn-reset').onclick = () => {
+  session = { wpm: [], acc: [], keystrokes: 0, backspaces: 0, unmapped: 0 };
+  logEl.textContent = ''; logT0 = 0;
+  buildOrder(); loadPhrase();
+};
+optRand.onchange  = () => { buildOrder(); loadPhrase(); };
+optLower.onchange = () => loadPhrase();
+
+// 버튼을 누른 뒤에도 키 입력이 페이지로 오도록 포커스를 뺀다
+document.querySelectorAll('button').forEach(b => b.addEventListener('click', () => b.blur()));
+
+setInterval(() => { if (tStart && !locked) updateStats(); }, 100);
+
+buildOrder();
+loadPhrase();
+</script>
+</body>
+</html>
