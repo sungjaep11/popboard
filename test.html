@@ -1,0 +1,1778 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PopBoard 키보드 테스트 — MacKenzie phrase set</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232c; --line:#2b3440;
+    --fg:#e6edf3; --dim:#8b98a5; --dimmer:#5c6773;
+    --ok:#3fb950; --bad:#f85149; --accent:#58a6ff; --warn:#d29922;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--fg);
+    font:14px/1.5 var(--mono);
+    padding:18px; max-width:1180px; margin:0 auto;
+  }
+  h1{font-size:15px;margin:0;font-weight:600;letter-spacing:.02em}
+  h1 span{color:var(--dim);font-weight:400}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+  .hint{color:var(--dimmer);font-size:12px}
+
+  /* ── 통계 ─────────────────────────────────────────── */
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:8px;margin-bottom:14px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
+  .stat .k{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em}
+  .stat .v{font-size:21px;font-variant-numeric:tabular-nums;margin-top:2px}
+  .stat .v small{font-size:11px;color:var(--dim)}
+
+  /* ── 타이핑 테스트 ────────────────────────────────── */
+  .test{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:22px 24px;margin-bottom:12px}
+  .test.done{border-color:var(--ok)}
+  #phrase{font-size:26px;line-height:1.7;letter-spacing:.01em;word-break:break-word;white-space:pre-wrap}
+  #phrase .c{border-radius:2px}
+  #phrase .pending{color:var(--dimmer)}
+  #phrase .correct{color:var(--ok)}
+  #phrase .wrong{color:var(--bad);background:rgba(248,81,73,.16);text-decoration:underline}
+  #phrase .wrong.sp{background:rgba(248,81,73,.35)}
+  #phrase .extra{color:var(--bad);opacity:.75}
+  #phrase .caret{border-left:2px solid var(--accent);margin-left:-2px;animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{border-color:transparent}}
+
+  /* 실제로 친 글자. 위 목표 문장과 세로로 맞아야 하므로 폰트·크기·자간을 동일하게
+     둔다. 최대 43자라 26px에서도 줄바꿈이 없어 열이 어긋나지 않는다. */
+  #typed{
+    font-size:26px;line-height:1.7;letter-spacing:.01em;white-space:pre-wrap;
+    word-break:break-word;min-height:1.7em;
+    margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);
+  }
+  #typed .tok{color:var(--dim)}
+  #typed .tbad{color:var(--bad);background:rgba(248,81,73,.22);border-radius:2px;font-weight:700}
+  #typed .tbad.sp{background:rgba(248,81,73,.5)}
+  #typed .ph{font-size:13px;color:var(--dimmer);letter-spacing:0}
+  .meta{display:flex;gap:16px;margin-top:16px;font-size:12px;color:var(--dim);flex-wrap:wrap}
+  #m-hint{display:none;color:var(--ok);font-weight:600}
+  .test.done #m-hint{display:inline}
+
+  /* ── 컨트롤 ───────────────────────────────────────── */
+  .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:18px}
+  button{
+    font:inherit;font-size:12px;background:var(--panel2);color:var(--fg);
+    border:1px solid var(--line);border-radius:6px;padding:6px 12px;cursor:pointer;
+  }
+  button:hover{border-color:var(--dim)}
+  button:active{background:var(--line)}
+  button:disabled{opacity:.4;cursor:default}
+  button:disabled:hover{border-color:var(--line)}
+  label.chk{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dim);cursor:pointer}
+  .sep{flex:1}
+  .controls input[type=text]{
+    font:inherit;font-size:12px;background:var(--panel2);color:var(--fg);
+    border:1px solid var(--line);border-radius:6px;padding:5px 9px;width:170px;
+  }
+  .controls input[type=number]{
+    font:inherit;font-size:12px;background:var(--panel2);color:var(--fg);
+    border:1px solid var(--line);border-radius:6px;padding:5px 9px;width:96px;
+  }
+  /* ── 로깅 완료 팝업 ───────────────────────────────
+     목표 문장을 다 치고 나면 화면 가운데에 카드로 알린다. 참가자는 문장만
+     보고 있어서 컨트롤 줄의 글자 색이 바뀌는 정도로는 끝난 걸 못 알아챈다. */
+  .modal{
+    position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;
+    background:rgba(0,0,0,.6);opacity:0;pointer-events:none;transition:opacity .18s ease;
+  }
+  .modal.open{opacity:1;pointer-events:auto}
+  .card{
+    background:var(--panel);border:1px solid var(--ok);border-radius:10px;
+    padding:26px 30px;width:min(420px,92vw);text-align:center;
+    box-shadow:0 18px 50px rgba(0,0,0,.5);
+    transform:translateY(8px) scale(.98);transition:transform .18s ease;
+  }
+  .modal.open .card{transform:none}
+  .card .mark{font-size:34px;line-height:1;color:var(--ok)}
+  .card h2{font-size:16px;margin:10px 0 4px;font-weight:600}
+  .card .sub{font-size:12px;color:var(--dim);word-break:break-all}
+  .card .nums{
+    display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:16px 0 18px;
+  }
+  .card .nums div{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:8px 4px}
+  .card .nums .k{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em}
+  .card .nums .v{font-size:19px;font-variant-numeric:tabular-nums;margin-top:2px}
+  .card .foot{font-size:11px;color:var(--dimmer);margin-top:12px}
+
+  #log-info{font-variant-numeric:tabular-nums}
+  #log-info.rec{color:var(--bad)}
+  #log-info.done{color:var(--ok)}
+
+  /* ── 햅틱 튜너 (왼쪽 서랍) ────────────────────────── */
+  /* 타이핑 테스트가 화면의 주인공이라 튜너는 평소엔 접어둔다. 햄버거를 누르면
+     왼쪽에서 밀려 나오고, 열려 있는 동안에도 오른쪽의 테스트는 계속 보인다. */
+  .burger{
+    font:inherit;font-size:15px;line-height:1;background:var(--panel);color:var(--fg);
+    border:1px solid var(--line);border-radius:6px;padding:7px 10px;cursor:pointer;
+    flex:none;align-self:center;
+  }
+  .burger:hover{border-color:var(--dim)}
+  .burger.live{border-color:var(--ok);color:var(--ok)}
+  .scrim{
+    position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:40;
+    opacity:0;pointer-events:none;transition:opacity .18s ease;
+  }
+  .scrim.open{opacity:1;pointer-events:auto}
+  .drawer{
+    position:fixed;top:0;left:0;bottom:0;width:min(560px,94vw);z-index:50;
+    background:var(--panel);border-right:1px solid var(--line);
+    padding:16px 18px 24px;overflow-y:auto;
+    transform:translateX(-100%);transition:transform .18s ease;
+  }
+  .drawer.open{transform:none}
+  .dhead{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
+  .dhead h2{font-size:11px;margin:0;color:var(--dim);text-transform:uppercase;
+            letter-spacing:.06em;font-weight:600}
+  .trow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  .tstat{font-size:11px;color:var(--dimmer);border:1px solid var(--line);border-radius:999px;padding:3px 10px}
+  .tstat.on{color:var(--ok);border-color:var(--ok)}
+  .tstat.err{color:var(--bad);border-color:var(--bad)}
+  button.danger{border-color:#5a2d2b;color:#ff9d97}
+  button.danger:hover{border-color:var(--bad)}
+  button.on{background:var(--accent);border-color:var(--accent);color:#0e1116;font-weight:700}
+
+  .modes{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-bottom:14px}
+  .mode{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:9px 11px;cursor:pointer}
+  .mode:hover{border-color:var(--dim)}
+  .mode.sel{border-color:var(--accent);background:rgba(88,166,255,.08)}
+  .mode b{font-size:12px;display:block}
+  .mode .md{font-size:10.5px;color:var(--dim);line-height:1.5;margin-top:3px}
+  .mode.sel b{color:var(--accent)}
+
+  .tgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-bottom:14px}
+  .tstack{display:grid;gap:16px;align-content:start}
+  .tcol h3{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;
+           margin:0 0 8px;font-weight:600;border-bottom:1px solid var(--line);padding-bottom:5px}
+  .prow{margin-bottom:9px}
+  .prow.off{opacity:.34}
+  .plab{display:flex;align-items:baseline;gap:8px;font-size:11.5px}
+  .plab .pn{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .plab .pmm{color:var(--dimmer);font-size:10.5px}
+  .prow input[type=number]{
+    font:inherit;font-size:11.5px;width:66px;text-align:right;background:var(--panel2);
+    color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:2px 5px;
+  }
+  .prow input[type=range]{width:100%;margin:3px 0 0;accent-color:var(--accent);height:14px}
+  /* 슬라이더 범위를 벗어난 값. 슬라이더는 끝에 붙어 있지만 실제 값은 더 크거나 작다 */
+  .prow.oor input[type=number]{border-color:var(--warn);color:var(--warn)}
+  .prow.oor input[type=range]{accent-color:var(--warn)}
+  .phint{font-size:10px;color:var(--dimmer);line-height:1.45}
+  .pseg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:4px;margin:3px 0 0}
+  .pseg button{font-size:11px;padding:5px 4px;white-space:nowrap}
+
+  .tlive{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px;margin-bottom:14px}
+  .lv{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:7px 9px}
+  .lv .k{font-size:9.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
+  .lv .v{font-size:16px;font-variant-numeric:tabular-nums;margin-top:1px}
+  .lv .v small{font-size:10px;color:var(--dim)}
+  .bar{height:3px;background:var(--line);border-radius:2px;margin-top:5px;overflow:hidden}
+  .bar i{display:block;height:100%;background:var(--accent);width:0}
+
+  #t-snippet{
+    background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:10px 12px;
+    font-size:11px;line-height:1.6;white-space:pre;overflow-x:auto;margin:0 0 8px;color:var(--dim);
+  }
+  #t-snippet b{color:var(--fg);font-weight:400}
+  #t-log{font-size:11px;line-height:1.65;height:150px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+  #t-log .lcfg{color:var(--accent)}
+  #t-log .lok{color:var(--ok)}
+  #t-log .lerr{color:var(--bad)}
+  #t-log .lprobe{color:var(--warn)}
+  #t-log .ltx{color:var(--dimmer)}
+  .kcap.telit{stroke:var(--warn);stroke-width:1.1}
+
+  /* ── 키보드 ───────────────────────────────────────── */
+  .kbwrap{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;margin-bottom:12px;overflow-x:auto}
+  svg{display:block;width:100%;min-width:640px;height:auto}
+  .kcap{fill:var(--panel2);stroke:var(--line);stroke-width:.5}
+  .kcap.ghost{fill:none;stroke:var(--dimmer);stroke-width:.4;stroke-dasharray:2 1.6}
+  .kcap.lit{fill:var(--accent);stroke:var(--accent)}
+  .kcap.ghostlit{fill:rgba(210,153,34,.55);stroke:var(--warn);stroke-dasharray:none}
+  .klbl{fill:var(--fg);font-size:5px;text-anchor:middle;dominant-baseline:central;font-family:var(--mono);pointer-events:none}
+  .klbl.ghost{fill:var(--dimmer);font-size:4px}
+  .klbl.lit{fill:#0e1116;font-weight:700}
+  .sensor{fill:rgba(88,166,255,.06);stroke:var(--accent);stroke-width:.4;stroke-dasharray:3 2}
+  .sensorlbl{fill:var(--accent);font-size:4px;font-family:var(--mono)}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font-size:11px;color:var(--dim);margin-top:12px}
+  .legend i{display:inline-block;width:16px;height:9px;border-radius:2px;vertical-align:-1px;margin-right:5px}
+
+  footer{color:var(--dimmer);font-size:11px;margin-top:16px;line-height:1.7}
+  code{background:var(--panel2);padding:1px 5px;border-radius:3px;color:var(--fg)}
+</style>
+</head>
+<body>
+
+<header>
+  <button class="burger" id="t-open" title="햅틱 튜너 열기" aria-label="햅틱 튜너 열기">☰</button>
+  <h1>PopBoard 키보드 테스트 <span>— MacKenzie phrase set (500)</span></h1>
+  <span class="hint">아무 키나 누르면 시작. 문장을 다 치면 <b>스페이스</b>로 다음 문장.</span>
+</header>
+
+<div class="stats">
+  <div class="stat"><div class="k">WPM</div><div class="v" id="s-wpm">–</div></div>
+  <div class="stat"><div class="k">정확도</div><div class="v" id="s-acc">–</div></div>
+  <div class="stat"><div class="k">세션 평균 WPM</div><div class="v" id="s-avg">–</div></div>
+  <div class="stat"><div class="k">완료 문장</div><div class="v" id="s-done">0</div></div>
+  <div class="stat"><div class="k">키스트로크</div><div class="v" id="s-ks">0</div></div>
+  <div class="stat"><div class="k">백스페이스</div><div class="v" id="s-bs">0</div></div>
+  <div class="stat"><div class="k">미매핑 키</div><div class="v" id="s-unmapped">0</div></div>
+  <div class="stat"><div class="k">평균 편심</div><div class="v" id="s-off">–</div></div>
+</div>
+
+<div class="test" id="test"><div id="phrase"></div>
+  <div id="typed"></div>
+  <div class="meta">
+    <span id="m-idx"></span>
+    <span id="m-time">0.00 s</span>
+    <span id="m-len"></span>
+    <span id="m-hint">␣ 스페이스 → 다음 문장 &nbsp;·&nbsp; ⌫ 백스페이스 → 되돌아가 수정</span>
+  </div>
+</div>
+
+<div class="controls">
+  <button id="btn-next">다음 문장 →</button>
+  <button id="btn-retry">현재 문장 다시</button>
+  <button id="btn-reset">세션 리셋</button>
+  <label class="chk"><input type="checkbox" id="opt-lower" checked> 소문자 정규화</label>
+  <label class="chk"><input type="checkbox" id="opt-rand" checked> 무작위 순서</label>
+  <div class="sep"></div>
+  <span class="hint">기기엔 Enter/Esc가 없어 조작은 이 버튼으로</span>
+</div>
+
+<!-- 로깅: 완료한 문장 한 줄 = 기록 한 줄. 지금 튜너에 들어 있는 햅틱 값도 같이
+     남겨야 나중에 "어떤 설정에서 나온 수치인지"를 되짚을 수 있다.
+     저장은 serve.py 가 맡는다 — 브라우저엔 아무것도 안 남는다. -->
+<div class="controls">
+  <button id="btn-log">● 로깅 시작</button>
+  <input type="text" id="log-tag" placeholder="조건 태그 (예: P01-mode2)">
+  <input type="number" id="log-limit" min="1" step="1" placeholder="문장 수" title="이 개수만큼 문장을 끝내면 로깅이 자동으로 멈춘다. 비워두면 수동 중지.">
+  <span class="hint" id="log-info">대기 중</span>
+  <div class="sep"></div>
+  <span class="hint">문장당 한 줄 / 키 하나당 한 줄(입력 스트림·IKI) / 버클링 하나당 한 줄(편심 mm)</span>
+</div>
+
+<!-- 로깅이 목표 문장 수를 채우면 뜨는 카드. 아무 키나 눌러도 닫힌다. -->
+<div class="modal" id="done-modal" role="dialog" aria-modal="true" aria-labelledby="done-title">
+  <div class="card">
+    <div class="mark">✔</div>
+    <h2 id="done-title">로깅 완료</h2>
+    <div class="sub" id="done-sub"></div>
+    <div class="nums">
+      <div><div class="k">문장</div><div class="v" id="done-n">0</div></div>
+      <div><div class="k">키</div><div class="v" id="done-k">0</div></div>
+      <div><div class="k">타건</div><div class="v" id="done-p">0</div></div>
+    </div>
+    <button id="done-ok">확인</button>
+    <div class="foot">아무 키나 누르면 닫힌다 — 타이핑 테스트는 그대로 이어진다</div>
+  </div>
+</div>
+
+<div class="scrim" id="t-scrim"></div>
+<aside class="drawer" id="tuner" aria-label="햅틱 튜너">
+  <div class="dhead">
+    <button class="burger" id="t-close" title="닫기 (Esc)" aria-label="닫기">✕</button>
+    <h2>햅틱 튜너</h2>
+  </div>
+
+  <div class="trow">
+    <button id="t-connect">기기 연결</button>
+    <span class="tstat" id="t-status">미연결</span>
+    <button id="t-get">기기에서 읽기</button>
+    <button id="t-push">현재 값 전부 전송</button>
+    <button id="t-defaults">이 모드 기본값</button>
+    <button id="t-eesave">EEPROM 저장</button>
+    <button id="t-eeload">EEPROM 복원</button>
+    <div class="sep"></div>
+    <button id="t-vibtest">진동 테스트</button>
+    <button id="t-vibhold">계속 울리기</button>
+    <div class="sep"></div>
+    <button id="t-hid" class="danger">HID 타이핑 끄기</button>
+  </div>
+
+  <div class="modes" id="t-modes"></div>
+
+  <!-- 왼쪽에 긴 그룹 하나, 오른쪽에 짧은 그룹 둘. 서랍이 좁아 3열이 안 들어가고,
+       그냥 3열 grid로 두면 오른쪽 아래가 빈다. -->
+  <div class="tgrid">
+    <div class="tcol"><h3>force displacement curve</h3><div id="g-curve"></div></div>
+    <div class="tstack">
+      <div class="tcol"><h3>위치 의존</h3><div id="g-pos"></div></div>
+      <div class="tcol"><h3>진동 · beta (mode 3)</h3><div id="g-vib"></div></div>
+      <div class="tcol"><h3>센서 캘리브레이션</h3><div id="g-sys"></div></div>
+    </div>
+  </div>
+
+  <div class="tlive">
+    <div class="lv"><div class="k">L 키</div><div class="v" id="lv-lkey">–</div></div>
+    <div class="lv"><div class="k">L 힘 / 임계</div><div class="v" id="lv-lf">–</div>
+      <div class="bar"><i id="lv-lbar"></i></div></div>
+    <div class="lv"><div class="k">L 편심</div><div class="v" id="lv-le">–</div></div>
+    <div class="lv"><div class="k">L 진동</div><div class="v" id="lv-lv">–</div></div>
+    <div class="lv"><div class="k">R 키</div><div class="v" id="lv-rkey">–</div></div>
+    <div class="lv"><div class="k">R 힘 / 임계</div><div class="v" id="lv-rf">–</div>
+      <div class="bar"><i id="lv-rbar"></i></div></div>
+    <div class="lv"><div class="k">R 편심</div><div class="v" id="lv-re">–</div></div>
+    <div class="lv"><div class="k">R 진동</div><div class="v" id="lv-rv">–</div></div>
+    <div class="lv"><div class="k">드롭</div><div class="v" id="lv-drop">–</div></div>
+  </div>
+
+  <div class="trow">
+    <input type="text" id="t-pname" placeholder="프리셋 이름"
+           style="font:inherit;font-size:11.5px;background:var(--panel2);color:var(--fg);
+                  border:1px solid var(--line);border-radius:6px;padding:5px 9px;width:150px">
+    <button id="t-psave">프리셋 저장</button>
+    <select id="t-plist" style="font:inherit;font-size:11.5px;background:var(--panel2);color:var(--fg);
+                                border:1px solid var(--line);border-radius:6px;padding:5px 9px"></select>
+    <button id="t-pload">불러오기</button>
+    <button id="t-pdel">삭제</button>
+    <div class="sep"></div>
+    <button id="t-copy">복사</button>
+    <button id="t-json">JSON 복사</button>
+  </div>
+
+  <pre id="t-snippet"></pre>
+
+  <div class="trow" style="margin:0 0 6px">
+    <span class="hint">시리얼 로그</span>
+    <label class="chk"><input type="checkbox" id="t-showtel"> 텔레메트리까지 표시</label>
+    <div class="sep"></div>
+    <button id="t-clear">지우기</button>
+  </div>
+  <div id="t-log"></div>
+</aside>
+
+<div class="kbwrap">
+  <svg id="kb" viewBox="-6 -8 299 106" role="img" aria-label="PopBoard 물리 키 배열"></svg>
+  <div class="legend">
+    <span><i style="background:var(--panel2);border:1px solid var(--line)"></i>keymap.h에 매핑됨</span>
+    <span><i style="background:var(--accent)"></i>지금 눌림</span>
+    <span><i style="background:none;border:1px dashed var(--dimmer)"></i>오버레이엔 있으나 미매핑</span>
+    <span><i style="background:rgba(210,153,34,.55);border:1px solid var(--warn)"></i>미매핑 키가 눌림(= 다른 키보드 입력)</span>
+    <span><i style="background:rgba(88,166,255,.10);border:1px dashed var(--accent)"></i>Sensel 감지영역</span>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ══ MacKenzie & Soukoreff phrase set (yorku.ca/mack/phrases2.txt) ══ */
+const PHRASES = [
+  "my watch fell in the water", "prevailing wind from the east", "never too rich and never too thin", "breathing is difficult",
+  "I can see the rings on Saturn", "physics and chemistry are hard", "my bank account is overdrawn", "elections bring out the best",
+  "we are having spaghetti", "time to go shopping", "a problem with the engine", "elephants are afraid of mice",
+  "my favorite place to visit", "three two one zero blast off", "my favorite subject is psychology", "circumstances are unacceptable",
+  "watch out for low flying objects", "if at first you do not succeed", "please provide your date of birth", "we run the risk of failure",
+  "prayer in schools offends some", "he is just like everyone else", "great disturbance in the force", "love means many things",
+  "you must be getting old", "the world is a stage", "can I skate with sister today", "neither a borrower nor a lender be",
+  "one heck of a question", "question that must be answered", "beware the ides of March", "double double toil and trouble",
+  "the power of denial", "I agree with you", "do not say anything", "play it again Sam",
+  "the force is with you", "you are not a jedi yet", "an offer you cannot refuse", "are you talking to me",
+  "yes you are very smart", "all work and no play", "hair gel is very greasy", "Valium in the economy size",
+  "the facts get in the way", "the dreamers of dreams", "did you have a good time", "space is a high priority",
+  "you are a wonderful example", "do not squander your time", "do not drink too much", "take a coffee break",
+  "popularity is desired by all", "the music is better than it sounds", "starlight and dewdrop", "the living is easy",
+  "fish are jumping", "the cotton is high", "drove my chevy to the levee", "but the levee was dry",
+  "I took the rover from the shop", "movie about a nutty professor", "come and see our new car", "coming up with killer sound bites",
+  "I am going to a music lesson", "the opposing team is over there", "soon we will return from the city", "I am wearing a tie and a jacket",
+  "the quick brown fox jumped", "all together in one big pile", "wear a crown with many jewels", "there will be some fog tonight",
+  "I am allergic to bees and peanuts", "he is still on our team", "the dow jones index has risen", "my preferred treat is chocolate",
+  "the king sends you to the tower", "we are subjects and must obey", "mom made her a turtleneck", "goldilocks and the three bears",
+  "we went grocery shopping", "the assignment is due today", "what you see is what you get", "for your information only",
+  "a quarter of a century", "the store will close at ten", "head shoulders knees and toes", "vanilla flavored ice cream",
+  "frequently asked questions", "round robin scheduling", "information super highway", "my favorite web browser",
+  "the laser printer is jammed", "all good boys deserve fudge", "the second largest country", "call for more details",
+  "just in time for the party", "have a good weekend", "video camera with a zoom lens", "what a monkey sees a monkey will do",
+  "that is very unfortunate", "the back yard of our house", "this is a very good idea", "reading week is just about here",
+  "our fax number has changed", "thank you for your help", "no exchange without a bill", "the early bird gets the worm",
+  "buckle up for safety", "this is too much to handle", "protect your environment", "world population is growing",
+  "the library is closed today", "Mary had a little lamb", "teaching services will help", "we accept personal checks",
+  "this is a non profit organization", "user friendly interface", "healthy food is good for you", "hands on experience with a job",
+  "this watch is too expensive", "the postal service is very slow", "communicate through email", "the capital of our nation",
+  "travel at the speed of light", "I do not fully agree with you", "gas bills are sent monthly", "earth quakes are predictable",
+  "life is but a dream", "take it to the recycling depot", "sent this by registered mail", "fall is my favorite season",
+  "a fox is a very smart animal", "the kids are very excited", "parking lot is full of trucks", "my bike has a flat tire",
+  "do not walk too quickly", "a duck quacks to ask for food", "limited warranty of two years", "the four seasons will come",
+  "the sun rises in the east", "it is very windy today", "do not worry about this", "dashing through the snow",
+  "want to join us for lunch", "stay away from strangers", "accompanied by an adult", "see you later alligator",
+  "make my day you sucker", "I can play much better now", "she wears too much makeup", "my bare face in the wind",
+  "batman wears a cape", "I hate baking pies", "lydia wants to go home", "win first prize in the contest",
+  "freud wrote of the ego", "I do not care if you do that", "always cover all the bases", "nobody cares anymore",
+  "can we play cards tonight", "get rid of that immediately", "I watched blazing saddles", "the sum of the parts",
+  "they love to yap about nothing", "peek out the window", "be home before midnight", "he played a pimp in that movie",
+  "I skimmed through your proposal", "he was wearing a sweatshirt", "no more war no more bloodshed", "toss the ball around",
+  "I will meet you at noon", "I want to hold your hand", "the children are playing", "superman never wore a mask",
+  "I listen to the tape everyday", "he is shouting loudly", "correct your diction immediately", "seasoned golfers love the game",
+  "he cooled off after she left", "my dog sheds his hair", "join us on the patio", "these cookies are so amazing",
+  "I can still feel your presence", "the dog will bite you", "a most ridiculous thing", "where did you get that tie",
+  "what a lovely red jacket", "do you like to shop on Sunday", "I spilled coffee on the carpet", "the largest of the five oceans",
+  "shall we play a round of cards", "olympic athletes use drugs", "my mother makes good cookies", "do a good deed to someone",
+  "quick there is someone knocking", "flashing red light means stop", "sprawling subdivisions are bad", "where did I leave my glasses",
+  "on the way to the cottage", "a lot of chlorine in the water", "do not drink the water", "my car always breaks in the winter",
+  "santa claus got stuck", "public transit is much faster", "zero in on the facts", "make up a few more phrases",
+  "my fingers are very cold", "rain rain go away", "bad for the environment", "universities are too expensive",
+  "the price of gas is high", "the winner of the race", "we drive on parkways", "we park in driveways",
+  "go out for some pizza and beer", "effort is what it will take", "where can my little dog be", "if you were not so stupid",
+  "not quite so smart as you think", "do you like to go camping", "this person is a disaster", "the imagination of the nation",
+  "universally understood to be wrong", "listen to five hours of opera", "an occasional taste of chocolate", "victims deserve more redress",
+  "the protesters blocked all traffic", "the acceptance speech was boring", "work hard to reach the summit", "a little encouragement is needed",
+  "stiff penalty for staying out late", "the pen is mightier than the sword", "exceed the maximum speed limit", "in sharp contrast to your words",
+  "this leather jacket is too warm", "consequences of a wrong turn", "this mission statement is baloney", "you will loose your voice",
+  "every apple from every tree", "are you sure you want this", "the fourth edition was better", "this system of taxation",
+  "beautiful paintings in the gallery", "a yard is almost as a meter", "we missed your birthday", "coalition governments never work",
+  "destruction of the rain forest", "I like to play tennis", "acutely aware of her good looks", "you want to eat your cake",
+  "machinery is too complicated", "a glance in the right direction", "I just cannot figure this out", "please follow the guidelines",
+  "an airport is a very busy place", "mystery of the lost lagoon", "is there any indication of this", "the chamber makes important decisions",
+  "this phenomenon will never occur", "obligations must be met first", "valid until the end of the year", "file all complaints in writing",
+  "tickets are very expensive", "a picture is worth many words", "this camera takes nice photographs", "it looks like a shack",
+  "the dog buried the bone", "the daring young man", "this equation is too complicated", "express delivery is very fast",
+  "I will put on my glasses", "a touchdown in the last minute", "the treasury department is broke", "a good response to the question",
+  "well connected with people", "the bathroom is good for reading", "the generation gap gets wider", "chemical spill took forever",
+  "prepare for the exam in advance", "interesting observation was made", "bank transaction was not registered", "your etiquette needs some work",
+  "we better investigate this", "stability of the nation", "house with new electrical panel", "our silver anniversary is coming",
+  "the presidential suite is very busy", "the punishment should fit the crime", "sharp cheese keeps the mind sharp", "the registration period is over",
+  "you have my sympathy", "the objective of the exercise", "historic meeting without a result", "very reluctant to enter",
+  "good at addition and subtraction", "six daughters and seven sons", "a thoroughly disgusting thing to say", "sign the withdrawal slip",
+  "relations are very strained", "the minimum amount of time", "a very traditional way to dress", "the aspirations of a nation",
+  "medieval times were very hard", "a security force of eight thousand", "there are winners and losers", "the voters turfed him out",
+  "pay off a mortgage for a house", "the collapse of the Roman empire", "did you see that spectacular explosion", "keep receipts for all your expenses",
+  "the assault took six months", "get your priorities in order", "traveling requires a lot of fuel", "longer than a football field",
+  "a good joke deserves a good laugh", "the union will go on strike", "never mix religion and politics", "interactions between men and women",
+  "where did you get such a silly idea", "it should be sunny tomorrow", "a psychiatrist will help you", "you should visit to a doctor",
+  "you must make an appointment", "the fax machine is broken", "players must know all the rules", "a dog is the best friend of a man",
+  "would you like to come to my house", "February has an extra day", "do not feel too bad about it", "this library has many books",
+  "construction makes traveling difficult", "he called seven times", "that is a very odd question", "a feeling of complete exasperation",
+  "we must redouble our efforts", "no kissing in the library", "that agreement is rife with problems", "vote according to your conscience",
+  "my favourite sport is racketball", "sad to hear that news", "the gun discharged by accident", "one of the poorest nations",
+  "the algorithm is too complicated", "your presentation was inspiring", "that land is owned by the government", "burglars never leave their business card",
+  "the fire blazed all weekend", "if diplomacy does not work", "please keep this confidential", "the rationale behind the decision",
+  "the cat has a pleasant temperament", "our housekeeper does a thorough job", "her majesty visited our country", "handicapped persons need consideration",
+  "these barracks are big enough", "sing the gospel and the blues", "he underwent triple bypass surgery", "the ropes of a new organization",
+  "peering through a small hole", "rapidly running short on words", "it is difficult to concentrate", "give me one spoonful of coffee",
+  "two or three cups of coffee", "just like it says on the can good", "companies announce a merger", "electric cars need big fuel cells",
+  "the plug does not fit the socket", "drugs should be avoided", "the most beautiful sunset", "we dine out on the weekends",
+  "get aboard the ship is leaving", "the water was monitored daily", "he watched in astonishment", "a big scratch on the tabletop",
+  "salesmen must make their monthly quota", "saving that child was an heroic effort", "granite is the hardest of all rocks", "bring the offenders to justice",
+  "every Saturday he folds the laundry", "careless driving results in a fine", "microscopes make small things look big", "a coupon for a free sample",
+  "fine but only in moderation", "a subject one can really enjoy", "important for political parties", "that sticker needs to be validated",
+  "the fire raged for an entire month", "one never takes too many precautions", "we have enough witnesses", "labour unions know how to organize",
+  "people blow their horn a lot", "a correction had to be published", "I like baroque and classical music", "the proprietor was unavailable",
+  "be discreet about your meeting", "meet tomorrow in the lavatory", "suburbs are sprawling up everywhere", "shivering is one way to keep warm",
+  "dolphins leap high out of the water", "try to enjoy your maternity leave", "the ventilation system is broken", "dinosaurs have been extinct for ages",
+  "an inefficient way to heat a house", "the bus was very crowded", "an injustice is committed every day", "the coronation was very exciting",
+  "look in the syllabus for the course", "rectangular objects have four sides", "prescription drugs require a note", "the insulation is not working",
+  "nothing finer than discovering a treasure", "our life expectancy has increased", "the cream rises to the top", "the high waves will swamp us",
+  "the treasurer must balance her books", "completely sold out of that", "the location of the crime", "the chancellor was very boring",
+  "the accident scene is a shrine for fans", "a tumor is OK provided it is benign", "please take a bath this month", "rent is paid at the beginning of the month",
+  "for murder you get a long prison sentence", "a much higher risk of getting cancer", "quit while you are ahead", "knee bone is connected to the thigh bone",
+  "safe to walk the streets in the evening", "luckily my wallet was found", "one hour is allotted for questions", "so you think you deserve a raise",
+  "they watched the entire movie", "good jobs for those with education", "jumping right out of the water", "the trains are always late",
+  "sit at the front of the bus", "do you prefer a window seat", "the food at this restaurant", "Canada has ten provinces",
+  "the elevator door appears to be stuck", "raindrops keep falling on my head", "spill coffee on the carpet", "an excellent way to communicate",
+  "with each step forward", "faster than a speeding bullet", "wishful thinking is fine", "nothing wrong with his style",
+  "arguing with the boss is futile", "taking the train is usually faster", "what goes up must come down", "be persistent to win a strike",
+  "presidents drive expensive cars", "the stock exchange dipped", "why do you ask silly questions", "that is a very nasty cut",
+  "what to do when the oil runs dry", "learn to walk before you run", "insurance is important for bad drivers", "traveling to conferences is fun",
+  "do you get nervous when you speak", "pumping helps if the roads are slippery", "parking tickets can be challenged", "apartments are too expensive",
+  "find a nearby parking spot", "gun powder must be handled with care", "just what the doctor ordered", "a rattle snake is very poisonous",
+  "weeping willows are found near water", "I cannot believe I ate the whole thing", "the biggest hamburger I have ever seen", "gamblers eventually loose their shirts",
+  "exercise is good for the mind", "irregular verbs are the hardest to learn", "they might find your comment offensive", "tell a lie and your nose will grow",
+  "an enlarged nose suggests you are a liar", "lie detector tests never work", "do not lie in court or else", "most judges are very honest",
+  "only an idiot would lie in court", "important news always seems to be late", "please try to be home before midnight", "if you come home late the doors are locked",
+  "dormitory doors are locked at midnight", "staying up all night is a bad idea", "you are a capitalist pig", "motivational seminars make me sick",
+  "questioning the wisdom of the courts", "rejection letters are discouraging", "the first time he tried to swim", "that referendum asked a silly question",
+  "a steep learning curve in riding a unicycle", "a good stimulus deserves a good response", "everybody looses in custody battles", "put garbage in an abandoned mine",
+  "employee recruitment takes a lot of effort", "experience is hard to come by", "everyone wants to win the lottery", "the picket line gives me the chills"
+];
+
+/* ══ 물리 배열 ═══════════════════════════════════════════════════════
+   mapped[]  : keymap.h의 KEYS[]와 1:1 (cx, cy, hx, hy 그대로)
+   ghost[]   : QWERTY.pdf 오버레이엔 있지만 keymap.h에 없는 키.
+               각 행이 15u(=286.5mm)로 딱 떨어지고 Q=2u, A=2.25u, Z=2.75u,
+               SPACE=3.75~10u가 실측값과 일치해 표준 u-그리드로 복원했다.
+   ─────────────────────────────────────────────────────────────────── */
+const U = 19.1;
+
+// Sensel Morph의 "감지영역"은 230 x 130 mm다 (240 x 139는 기기 외형 치수).
+// CAL_OX = -18.8 이므로 이 좌표계에서 감지영역은 x = 18.8 ~ 248.8.
+// 이 값이 맞다는 근거: keymap.h가 쓰는 x 범위가 20.2("1"의 왼쪽 모서리) ~
+// 247.35(BACKSPACE의 오른쪽 모서리)라 좌우 여백이 1.4 / 1.45 mm로 딱 떨어진다.
+// 240으로 잡으면 오른쪽만 11.3mm가 남아 캘리브레이션이 한쪽으로 쏠린 꼴이 된다.
+const SENSOR_W  = 230;
+const SENSOR_X0 = 18.8, SENSOR_X1 = SENSOR_X0 + SENSOR_W;
+
+const mapped = [
+  ['1','Digit1',28.7,8.9,8.5,8.5],  ['2','Digit2',47.8,8.9,8.5,8.5],
+  ['3','Digit3',66.9,8.9,8.5,8.5],  ['4','Digit4',86.0,8.9,8.5,8.5],
+  ['5','Digit5',105.1,8.9,8.5,8.5], ['6','Digit6',124.2,8.9,8.5,8.5],
+  ['7','Digit7',143.2,8.9,8.5,8.5], ['8','Digit8',162.4,8.9,8.5,8.5],
+  ['9','Digit9',181.5,8.9,8.5,8.5], ['0','Digit0',200.6,8.9,8.5,8.5],
+  ['⌫ BKSP','Backspace',229.3,8.9,18.05,8.5],
+  ['Q','KeyQ',38.2,27.95,8.5,8.5],   ['W','KeyW',57.3,27.95,8.5,8.5],
+  ['E','KeyE',76.4,27.95,8.5,8.5],   ['R','KeyR',95.5,27.95,8.5,8.5],
+  ['T','KeyT',114.6,27.95,8.5,8.5],  ['Y','KeyY',133.7,27.95,8.5,8.5],
+  ['U','KeyU',152.8,27.95,8.5,8.5],  ['I','KeyI',171.9,27.95,8.5,8.5],
+  ['O','KeyO',191.0,27.95,8.5,8.5],  ['P','KeyP',210.1,27.95,8.5,8.5],
+  ['A','KeyA',43.0,47.0,8.5,8.5],   ['S','KeyS',62.1,47.0,8.5,8.5],
+  ['D','KeyD',81.2,47.0,8.5,8.5],   ['F','KeyF',100.3,47.0,8.5,8.5],
+  ['G','KeyG',119.4,47.0,8.5,8.5],  ['H','KeyH',138.5,47.0,8.5,8.5],
+  ['J','KeyJ',157.6,47.0,8.5,8.5],  ['K','KeyK',176.7,47.0,8.5,8.5],
+  ['L','KeyL',195.8,47.0,8.5,8.5],
+  ['Z','KeyZ',52.5,66.05,8.5,8.5],   ['X','KeyX',71.6,66.05,8.5,8.5],
+  ['C','KeyC',90.7,66.05,8.5,8.5],   ['V','KeyV',109.8,66.05,8.5,8.5],
+  ['B','KeyB',128.9,66.05,8.5,8.5],  ['N','KeyN',148.0,66.05,8.5,8.5],
+  ['M','KeyM',167.1,66.05,8.5,8.5],
+  ['SPACE','Space',130.7,85.1,58.65,8.5],
+];
+
+// code=null: 매핑된 키가 이미 그 code를 쓰고 있어 하이라이트 대상에서 뺀 것
+const ghost = [
+  ['`','Backquote',9.6,8.9,9.55,8.5],   ['⌫ (원래 위치)',null,267.4,8.9,19.1,8.5],
+  ['TAB','Tab',14.3,27.95,14.32,8.5],    ['[','BracketLeft',229.2,27.95,9.55,8.5],
+  [']','BracketRight',248.3,27.95,9.55,8.5], ['\\','Backslash',272.2,27.95,14.32,8.5],
+  ['CAPS','CapsLock',16.7,47.0,16.71,8.5],  [';','Semicolon',214.9,47.0,9.55,8.5],
+  ["'",'Quote',234.0,47.0,9.55,8.5],    ['⏎ RETURN','Enter',265.0,47.0,21.49,8.5],
+  ['⇧ SHIFT','ShiftLeft',21.5,66.05,21.49,8.5], [',','Comma',186.2,66.05,9.55,8.5],
+  ['.','Period',205.3,66.05,9.55,8.5],   ['/','Slash',224.4,66.05,9.55,8.5],
+  ['⇧ SHIFT','ShiftRight',260.2,66.05,26.26,8.5],
+  ['CTRL','ControlLeft',11.9,85.1,11.94,8.5], ['WIN','MetaLeft',35.8,85.1,11.94,8.5],
+  ['ALT','AltLeft',59.7,85.1,11.94,8.5],['ALT','AltRight',203.0,85.1,11.94,8.5],
+  ['WIN','MetaRight',226.8,85.1,11.94,8.5], ['MENU','ContextMenu',250.7,85.1,11.94,8.5],
+  ['CTRL','ControlRight',274.6,85.1,11.94,8.5],
+];
+
+/* ══ 키보드 SVG 그리기 ══════════════════════════════════════════════ */
+const NS = 'http://www.w3.org/2000/svg';
+const svg = document.getElementById('kb');
+const capByCode = new Map();   // code -> [rect, text, isGhost]
+
+function el(tag, attrs){
+  const n = document.createElementNS(NS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  return n;
+}
+
+// 감지영역 밴드 먼저 (키 밑에 깔린다)
+svg.appendChild(el('rect', {x:SENSOR_X0, y:-4, width:SENSOR_X1-SENSOR_X0, height:98,
+                            rx:1.5, class:'sensor'}));
+const sl = el('text', {x:SENSOR_X0+2, y:-5, class:'sensorlbl'});
+sl.textContent = `Sensel 감지영역`;
+svg.appendChild(sl);
+
+function drawKey(label, code, cx, cy, hx, hy, isGhost){
+  const g = el('g', {});
+  const r = el('rect', {x:cx-hx, y:cy-hy, width:hx*2, height:hy*2, rx:1.4,
+                        class:'kcap' + (isGhost ? ' ghost' : '')});
+  const t = el('text', {x:cx, y:cy, class:'klbl' + (isGhost ? ' ghost' : '')});
+  t.textContent = label;
+  if (isGhost){
+    const ov = Math.max(0, Math.min(cx+hx, SENSOR_X1) - Math.max(cx-hx, SENSOR_X0));
+    const ti = el('title', {});
+    ti.textContent = `${label} — 센서 내 폭 ${ov.toFixed(1)} / ${(hx*2).toFixed(1)} mm`;
+    g.appendChild(ti);
+  }
+  g.appendChild(r); g.appendChild(t);
+  svg.appendChild(g);
+  if (code && !capByCode.has(code)) capByCode.set(code, [r, t, isGhost]);
+}
+
+ghost.forEach(k  => drawKey(k[0], k[1], k[2], k[3], k[4], k[5], true));
+mapped.forEach(k => drawKey(k[0], k[1], k[2], k[3], k[4], k[5], false));
+
+const mappedCodes = new Set(mapped.map(k => k[1]));
+
+/* ══ 타이핑 테스트 ══════════════════════════════════════════════════ */
+const $ = id => document.getElementById(id);
+const optLower = $('opt-lower'), optRand = $('opt-rand');
+
+let order = [], cursor = 0;      // 문장 순서
+let target = '', typed = '';
+let tStart = 0, tLast = 0;       // 첫/마지막 키다운 (ms)
+let locked = false;              // 완료 후 자동 전환 대기
+let session = { wpm: [], acc: [], keystrokes: 0, backspaces: 0, unmapped: 0,
+                offSum: 0, offN: 0 };
+let pKeys = 0, pBack = 0;        // 이번 문장에만 들어간 키 / 백스페이스 (로깅용)
+
+function shuffled(n){
+  const a = Array.from({length:n}, (_,i) => i);
+  for (let i = n-1; i > 0; i--){ const j = (Math.random()*(i+1))|0; [a[i],a[j]] = [a[j],a[i]]; }
+  return a;
+}
+function buildOrder(){
+  order = optRand.checked ? shuffled(PHRASES.length) : Array.from({length:PHRASES.length},(_,i)=>i);
+  cursor = 0;
+}
+function loadPhrase(){
+  const raw = PHRASES[order[cursor % order.length]];
+  target = optLower.checked ? raw.toLowerCase() : raw;
+  typed = ''; tStart = 0; tLast = 0; locked = false;
+  pKeys = 0; pBack = 0; curPresses = []; curKeys = [];
+  $('test').classList.remove('done');
+  render();
+}
+function nextPhrase(){ cursor++; loadPhrase(); }
+
+function render(){
+  const p = $('phrase');
+  p.textContent = '';
+  const n = Math.max(target.length, typed.length);
+  for (let i = 0; i < n; i++){
+    const s = document.createElement('span');
+    s.className = 'c';
+    if (i >= target.length){                       // 목표보다 길게 친 부분
+      s.classList.add('extra');
+      s.textContent = typed[i] === ' ' ? '␣' : typed[i];
+    } else if (i >= typed.length){
+      s.classList.add('pending');
+      s.textContent = target[i];
+    } else if (typed[i] === target[i]){
+      s.classList.add('correct');
+      s.textContent = target[i];
+    } else {
+      s.classList.add('wrong');
+      if (target[i] === ' ') s.classList.add('sp');
+      s.textContent = target[i];
+    }
+    if (i === typed.length) s.classList.add('caret');
+    p.appendChild(s);
+  }
+  if (typed.length >= n){                          // 캐럿이 맨 끝일 때
+    const s = document.createElement('span');
+    s.className = 'c caret'; s.textContent = ' ';
+    p.appendChild(s);
+  }
+
+  // 실제로 친 글자를 아래 줄에 그대로 보여준다. 위 줄은 목표 문장이라 틀렸을 때
+  // "무엇을 쳤는지"가 안 보이기 때문. 두 줄은 같은 폰트·크기라 열이 맞는다.
+  const tv = $('typed');
+  tv.textContent = '';
+  if (!typed.length){
+    const s = document.createElement('span');
+    s.className = 'ph';
+    s.textContent = '(입력한 글자가 여기 표시됩니다)';
+    tv.appendChild(s);
+  }
+  for (let i = 0; i < typed.length; i++){
+    const s = document.createElement('span');
+    const ok = typed[i] === target[i];
+    s.className = ok ? 'tok' : 'tbad';
+    if (!ok && typed[i] === ' ') s.classList.add('sp');   // 잘못 친 공백도 보이게
+    s.textContent = typed[i];
+    tv.appendChild(s);
+  }
+
+  $('m-idx').textContent  = `문장 ${(cursor % order.length) + 1} / ${PHRASES.length}`;
+  $('m-len').textContent  = `${typed.length} / ${target.length} 자`;
+  updateStats();
+}
+
+function elapsed(){ return tStart ? (tLast - tStart) / 1000 : 0; }
+
+function curWPM(){
+  const s = elapsed();
+  if (s <= 0 || typed.length < 2) return null;
+  return ((typed.length - 1) / s) * 60 / 5;
+}
+function curACC(){
+  if (!typed.length) return null;
+  let ok = 0;
+  const n = Math.min(typed.length, target.length);
+  for (let i = 0; i < n; i++) if (typed[i] === target[i]) ok++;
+  return ok / Math.max(typed.length, target.length);
+}
+
+function updateStats(){
+  const w = curWPM(), a = curACC();
+  $('s-wpm').innerHTML = w === null ? '–' : w.toFixed(1);
+  $('s-acc').innerHTML = a === null ? '–' : (a*100).toFixed(1) + '<small> %</small>';
+  $('m-time').textContent = elapsed().toFixed(2) + ' s';
+  const avg = session.wpm.length
+    ? session.wpm.reduce((x,y)=>x+y,0) / session.wpm.length : null;
+  $('s-avg').innerHTML = avg === null ? '–' : avg.toFixed(1);
+  $('s-done').textContent = session.wpm.length;
+  $('s-ks').textContent = session.keystrokes;
+  $('s-bs').textContent = session.backspaces;
+  $('s-unmapped').textContent = session.unmapped;
+  $('s-off').innerHTML = session.offN
+    ? (session.offSum / session.offN).toFixed(1) + '<small> mm</small>' : '–';
+}
+
+// 문장을 다 침. 여기서 세션에 기록하지 않는다 — 백스페이스로 되돌아가 고칠 수
+// 있으므로, 스페이스로 실제 넘어가는 순간의 최종 입력으로 기록한다.
+function completePhrase(){
+  locked = true;
+  $('test').classList.add('done');
+  updateStats();
+}
+function commitPhrase(){
+  const w = curWPM(), a = curACC();
+  if (w !== null) session.wpm.push(w);
+  if (a !== null) session.acc.push(a);
+  if (logging) logRecord();
+}
+
+/* ══ 타건 편심 ══════════════════════════════════════════════════════
+   펌웨어는 버클링(= 손가락이 클릭을 느끼는 그 순간)마다 #probe 를 뱉는다.
+   거기 mm/edge 가 "키 중심에서 얼마나 벗어나 눌렀나"다 — edge 0=정중앙,
+   1=키캡 가장자리, mm = edge x 8.5.
+
+   문제는 이게 시리얼로 오고 글자는 USB HID로 따로 온다는 것. 같은 타건이
+   두 경로로 갈라져 도착하고 순서도 보장되지 않는다. 그래서 "키 코드가 같고
+   시간이 가까운" 것끼리 짝지어 어느 글자의 편심인지를 붙인다. 짝을 못 지어도
+   타건 자체는 버리지 않는다 (문장 통계에는 그대로 들어간다). */
+const PAIR_MS = 250;
+let curPresses = [];              // 이번 문장에서 잡힌 타건
+let curKeys = [];                 // 이번 문장의 키 입력 (친 순서 그대로)
+let pendPress = [], pendKey = []; // 아직 짝을 못 만난 쪽
+
+// 펌웨어 KEYS[].label -> KeyboardEvent.code
+function probeCode(label){
+  if (!label) return null;
+  if (label === 'SPACE') return 'Space';
+  if (label === 'BACKSPACE') return 'Backspace';
+  if (/^[A-Z]$/.test(label)) return 'Key' + label;
+  if (/^[0-9]$/.test(label)) return 'Digit' + label;
+  return null;
+}
+function prune(a, now){ while (a.length && now - a[0].t > PAIR_MS) a.shift(); }
+
+// 키 하나를 입력 스트림에 적고, 짝이 될 타건을 찾는다 (probe가 먼저 온 경우).
+//   kind char = 글자, bksp = 백스페이스, next = 문장을 넘기는 스페이스,
+//        other = Shift 등 입력에 안 들어가는 키
+function noteKey(kind, code, ch, pos){
+  const now = performance.now();
+  curKeys.push({t:now, kind, code, ch, pos});
+
+  prune(pendPress, now);
+  for (let j = pendPress.length - 1; j >= 0; j--){
+    if (pendPress[j].code !== code) continue;
+    pendPress[j].ch = ch; pendPress[j].pos = pos;
+    pendPress.splice(j, 1);
+    return;
+  }
+  pendKey.push({t:now, code, ch, pos});
+  prune(pendKey, now);
+}
+
+addEventListener('vcm-press', e => {
+  const d = e.detail, now = performance.now();
+  const pr = {t:now, code:probeCode(d.key), key:d.key, mm:d.mm, edge:d.edge,
+              eff:d.eff, th:d.th, gain:d.gain, f:d.f, ch:'', pos:''};
+  if (isFinite(pr.mm)){ session.offSum += Math.abs(pr.mm); session.offN++; }
+
+  prune(pendKey, now);
+  let hit = -1;
+  for (let j = pendKey.length - 1; j >= 0; j--) if (pendKey[j].code === pr.code){ hit = j; break; }
+  if (hit >= 0){ pr.ch = pendKey[hit].ch; pr.pos = pendKey[hit].pos; pendKey.splice(hit, 1); }
+  else { pendPress.push(pr); prune(pendPress, now); }
+
+  curPresses.push(pr);
+  updateStats();
+});
+
+// 릴리즈는 키다운보다 100 ms 남짓 늦게 온다. 줄을 새로 만들지 않고, 아직 릴리즈를
+// 못 받은 같은 키의 가장 최근 타건에 최대힘을 얹는다 (같은 키를 연타해도 순서대로 맞는다).
+addEventListener('vcm-release', e => {
+  const d = e.detail;
+  for (let i = curPresses.length - 1; i >= 0; i--) {
+    const p = curPresses[i];
+    if (p.key === d.key && p.fmax === undefined) { p.fmax = d.fmax; return; }
+  }
+});
+
+// 편심 mm의 개수 / 평균 / 표준편차 / 최대, 그리고 정규화 edge 평균
+function pressStats(list){
+  const mm = list.map(p => Math.abs(p.mm)).filter(isFinite);
+  if (!mm.length) return null;
+  const eg = list.map(p => p.edge).filter(isFinite);
+  const m = mm.reduce((a,b) => a+b, 0) / mm.length;
+  const sd = Math.sqrt(mm.reduce((a,b) => a + (b-m)*(b-m), 0) / mm.length);
+  return {n:mm.length, mean:m, sd:sd, max:Math.max.apply(null, mm),
+          edge: eg.length ? eg.reduce((a,b) => a+b, 0) / eg.length : ''};
+}
+
+/* ══ 로깅 ═══════════════════════════════════════════════════════════
+   완료한 문장 하나가 기록 한 줄. 그때 튜너에 들어 있던 햅틱 값(모드 + 곡선 +
+   위치 의존)을 같이 박아둔다 — 설정을 바꿔가며 재보면 어느 줄이 어느 조건인지
+   나중에 알 수 없기 때문이다.
+
+   저장은 브라우저가 아니라 serve.py 가 한다. 로깅을 시작하면 서버가
+   logs/{모드}-{번호}/ 를 새로 만들고(position-1, position-2 …), 문장을 하나
+   끝낼 때마다 그 안의 CSV 세 개에 바로 이어 붙인다. 페이지엔 아무것도 안 남으니
+   새로고침하든 창을 닫든 이미 쓴 줄은 그대로 디스크에 있다. */
+const LOG_PARAMS = ['fPeak','fValley','fEnd','zPeak','zValley','zEnd',
+                    'deadband','gainMin','ampCurve','fEdgeScale','fEdgeCurve',
+                    'vibWhen','vibCenter','vibEdge','vibCurve','vibFreq','vibDur','vibDelay'];
+const LOG_COLS = ['ts','tag','idx','target','typed','is','sec','wpm','acc','err',
+                  'keys','bksp','ikiMean','ikiSD',
+                  'offN','offUnpaired','offMean','offSD','offMax','offEdge',
+                  'mode'].concat(LOG_PARAMS);
+// 키 하나 = 한 줄. 친 순서 그대로의 입력 스트림 (교정된 오타까지 남는다)
+const KEY_COLS   = ['pts','tag','idx','seq','ms','iki','kind','ch','code','pos'];
+// 타건(버클링) 하나 = 한 줄. pts로 문장 줄과, ms로 키 줄과 이어 붙인다
+//   f    = 버클링하는 그 프레임의 힘 (임계를 막 넘긴 값)
+//   fmax = 뗄 때까지 준 최대 힘. 클릭을 느낀 뒤에도 얼마나 더 눌러 넣는지가 여기 남는다.
+//          릴리즈 줄(#rel)이 늦게 오므로 문장의 마지막 타건은 비어 있을 수 있다.
+const PRESS_COLS = ['pts','tag','idx','ms','pos','ch','key','mm','edge','eff','th','gain','f','fmax'];
+// 폴더 이름에 쓸 모드 이름. 튜너의 MODES(0=equal …)와 순서를 맞춘다
+const MODE_SLUG = ['equal','position','force','beta'];
+
+let logging = false;
+let logDir  = null;         // 지금 쓰고 있는 폴더 (예: 'position-3')
+let logErr  = '';           // 서버가 안 받아주면 여기 담아 화면에 띄운다
+let nPhrase = 0, nKey = 0, nPress = 0;
+let logLimit = 0;           // 목표 문장 수. 0이면 수동으로 멈출 때까지 계속 간다
+let logDone  = false;       // 목표를 채워서 저절로 멈췄는지
+
+async function api(path, body){
+  const res = await fetch(path, {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  const j = await res.json().catch(() => ({error:'응답을 못 읽었다'}));
+  if (!res.ok || j.error) throw new Error(j.error || ('HTTP ' + res.status));
+  return j;
+}
+
+// 문장이 빨리 이어지면 요청이 겹쳐 줄 순서가 뒤집힐 수 있다. 한 줄로 세워 보낸다.
+let logQueue = Promise.resolve();
+function postRows(body){
+  logQueue = logQueue
+    .then(() => api('/api/append', body))
+    .then(() => { if (logErr){ logErr = ''; updateLogUI(); } })
+    .catch(e => { logErr = '저장 실패 — ' + e.message; updateLogUI(); });
+}
+
+async function startLogging(){
+  const t = window.vcmTuneState ? window.vcmTuneState() : null;
+  const mode = (t && MODE_SLUG[t.mode]) || 'unknown';
+  const j = await api('/api/session', {mode: mode, headers: {
+    phrases: csvHeader(LOG_COLS),
+    keys:    csvHeader(KEY_COLS),
+    presses: csvHeader(PRESS_COLS),
+  }});
+  logDir = j.dir;
+  nPhrase = nKey = nPress = 0;
+  // 목표 문장 수는 시작할 때 한 번 읽어 고정한다 — 도중에 칸을 건드려도 안 흔들린다.
+  logLimit = Math.max(0, Math.floor(+$('log-limit').value || 0));
+  logDone = false;
+  logging = true;
+}
+
+function logRecord(){
+  const w = curWPM(), a = curACC();
+  let err = Math.abs(typed.length - target.length);
+  const n = Math.min(typed.length, target.length);
+  for (let i = 0; i < n; i++) if (typed[i] !== target[i]) err++;
+
+  const r = {
+    ts: new Date().toISOString(),
+    tag: ($('log-tag').value || '').trim(),
+    idx: order[cursor % order.length] + 1,          // PHRASES[] 안에서의 번호
+    target: target,
+    typed: typed,
+    sec: +elapsed().toFixed(3),
+    wpm: w === null ? '' : +w.toFixed(2),
+    acc: a === null ? '' : +(a * 100).toFixed(2),   // %
+    err: err,
+    keys: pKeys,
+    bksp: pBack,
+  };
+
+  // 입력 스트림: 친 순서 그대로. '<' = 백스페이스, '␣' = 공백.
+  // 최종 문자열(typed)에는 안 남는 "고친 오타"가 여기엔 남는다 —
+  // 교정 오류율 / KSPC 같은 지표는 이게 있어야 계산된다.
+  const stream = curKeys.filter(x => x.kind === 'char' || x.kind === 'bksp');
+  r.is = stream.map(x => x.kind === 'bksp' ? '<' : x.ch).join('');
+
+  // 키 간 간격(IKI). 문장을 넘기는 스페이스는 뺀다.
+  const dt = [];
+  for (let i = 1; i < stream.length; i++) dt.push(stream[i].t - stream[i-1].t);
+  if (dt.length){
+    const m = dt.reduce((a,b) => a+b, 0) / dt.length;
+    r.ikiMean = +m.toFixed(1);
+    r.ikiSD   = +Math.sqrt(dt.reduce((a,b) => a + (b-m)*(b-m), 0) / dt.length).toFixed(1);
+  } else { r.ikiMean = ''; r.ikiSD = ''; }
+  // 이 문장을 치는 동안 잡힌 타건의 편심. 기기가 없거나 probe가 꺼져 있으면 0건.
+  const st = pressStats(curPresses);
+  r.offN = st ? st.n : 0;
+  // 글자와 짝이 안 맞은 타건. 한 번 눌렀는데 두 번 버클링한 경우가 여기 잡힌다.
+  r.offUnpaired = curPresses.filter(x => x.ch === '').length;
+  if (st){
+    r.offMean = +st.mean.toFixed(2);
+    r.offSD   = +st.sd.toFixed(2);
+    r.offMax  = +st.max.toFixed(2);
+    r.offEdge = st.edge === '' ? '' : +st.edge.toFixed(3);
+  }
+  // 튜너는 IIFE라 상태를 직접 못 본다. 열려 있으면 창에 걸어둔 접근자로 읽는다.
+  const t = window.vcmTuneState ? window.vcmTuneState() : null;
+  if (t){
+    r.mode = t.mode;
+    LOG_PARAMS.forEach(k => { if (t[k] !== undefined) r[k] = t[k]; });
+  }
+
+  // ms = 문장 첫 키를 0으로 한 경과 시간. 키 줄과 타건 줄이 같은 시계를 쓴다.
+  const rel = t0 => tStart ? +(t0 - tStart).toFixed(1) : '';
+
+  const keyRows = curKeys.map((x, i) => ({
+    pts:r.ts, tag:r.tag, idx:r.idx, seq:i, ms:rel(x.t),
+    iki: i > 0 ? +(x.t - curKeys[i-1].t).toFixed(1) : '',
+    kind:x.kind, ch:x.ch, code:x.code, pos:x.pos,
+  }));
+  const pressRows = curPresses.map(p => ({
+    pts:r.ts, tag:r.tag, idx:r.idx, ms:rel(p.t), pos:p.pos, ch:p.ch, key:p.key,
+    mm:p.mm, edge:p.edge, eff:p.eff, th:p.th, gain:p.gain, f:p.f, fmax:p.fmax,
+  }));
+
+  nPhrase++; nKey += keyRows.length; nPress += pressRows.length;
+  postRows({
+    dir:     logDir,
+    phrases: csvBody(LOG_COLS,   [r]),
+    keys:    csvBody(KEY_COLS,   keyRows),
+    presses: csvBody(PRESS_COLS, pressRows),
+  });
+  // 목표를 채웠으면 여기서 끝낸다. 방금 문장은 이미 큐에 올려놨으니 빠지지 않는다.
+  if (logLimit && nPhrase >= logLimit){ logging = false; logDone = true; showDoneCard(); }
+  updateLogUI();
+}
+
+// 목표를 채웠을 때 화면 가운데에 띄우는 카드. 로깅만 끝난 것이고 타이핑
+// 테스트는 계속 돌아가므로, 닫으면 곧바로 다음 문장을 칠 수 있다.
+let doneOpen = false;
+function showDoneCard(){
+  $('done-sub').textContent = '목표 ' + logLimit + '문장 — logs/' + logDir + '/ 에 저장됨';
+  $('done-n').textContent = nPhrase;
+  $('done-k').textContent = nKey;
+  $('done-p').textContent = nPress;
+  doneOpen = true;
+  $('done-modal').classList.add('open');
+  $('done-ok').focus();
+}
+function closeDoneCard(){
+  doneOpen = false;
+  $('done-modal').classList.remove('open');
+  $('done-ok').blur();   // 포커스가 남으면 스페이스가 문장 대신 버튼으로 간다
+}
+$('done-ok').onclick = closeDoneCard;
+$('done-modal').onclick = e => { if (e.target === $('done-modal')) closeDoneCard(); };
+
+function updateLogUI(){
+  const b = $('btn-log'), info = $('log-info');
+  b.textContent = logging ? '■ 로깅 중지' : '● 로깅 시작';
+  b.classList.toggle('on', logging);
+  info.classList.toggle('rec', logging || !!logErr);
+  info.classList.toggle('done', logDone && !logging && !logErr);
+  $('log-limit').disabled = logging;   // 도는 동안에는 목표를 못 바꾼다
+  if (logErr){ info.textContent = '⚠ ' + logErr; return; }
+  const goal = logLimit ? ' / ' + logLimit : '';
+  const cnt = '문장 ' + nPhrase + goal + ' · 키 ' + nKey + ' · 타건 ' + nPress;
+  info.textContent = logging ? '● logs/' + logDir + '/ — ' + cnt
+                   : logDir  ? (logDone ? '✔ ' + logLimit + '문장 완료 — ' : '')
+                               + 'logs/' + logDir + '/ 에 ' + cnt + ' 저장됨'
+                             : '시작하면 logs/{모드}-{번호}/ 가 새로 생긴다';
+}
+
+function csvCell(v){
+  const s = v === undefined || v === null ? '' : String(v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function csvHeader(cols){ return cols.join(','); }
+function csvBody(cols, rows){
+  return rows.map(r => cols.map(c => csvCell(r[c])).join(',')).join('\n');
+}
+
+$('btn-log').onclick = async () => {
+  const b = $('btn-log');
+  if (logging){ logging = false; logDone = false; updateLogUI(); return; }
+  b.disabled = true; logErr = ''; logDone = false;
+  try { await startLogging(); }
+  catch(e){ logErr = 'serve.py 에 연결 못 함 (' + e.message + ') — python3 serve.py 로 띄우고 localhost 로 열 것'; }
+  b.disabled = false;
+  updateLogUI();
+};
+// 태그 칸에 포커스가 남아 있으면 문장을 쳐도 글자가 그 칸으로 들어간다. Enter로 빠져나온다.
+$('log-tag').addEventListener('keydown', e => { if (e.key === 'Enter') $('log-tag').blur(); });
+$('log-limit').addEventListener('keydown', e => { if (e.key === 'Enter') $('log-limit').blur(); });
+
+/* ══ 키 이벤트 ══════════════════════════════════════════════════════ */
+function light(code, on){
+  const c = capByCode.get(code);
+  if (!c) return;
+  const [r, t, isGhost] = c;
+  r.classList.toggle(isGhost ? 'ghostlit' : 'lit', on);
+  t.classList.toggle('lit', on && !isGhost);
+}
+
+// 튜너 패널의 입력칸에 숫자를 치는 동안은 타이핑 테스트가 키를 먹으면 안 된다.
+// (테스트는 문서 전체에서 preventDefault를 걸기 때문에 이게 없으면 값을 못 친다)
+// 조건 태그처럼 패널 밖에 있는 텍스트 칸도 마찬가지다. 체크박스·버튼은 제외한다 —
+// 거기까지 비켜주면 포커스가 남았을 때 스페이스가 문장 대신 그 컨트롤로 간다.
+function inTuner(t){
+  if (!t || !t.closest) return false;
+  if (t.tagName === 'INPUT' && (t.type === 'text' || t.type === 'number')) return true;
+  return !!t.closest('#tuner') &&
+         /^(INPUT|SELECT|TEXTAREA|BUTTON|SUMMARY)$/.test(t.tagName);
+}
+
+addEventListener('keydown', e => {
+  if (inTuner(e.target)) return;
+  // 완료 카드가 떠 있으면 그 키는 카드를 닫는 데만 쓴다 (문장에 안 들어간다)
+  if (doneOpen){
+    if (e.metaKey || e.ctrlKey || e.altKey || /^F\d+$/.test(e.key)) return;
+    e.preventDefault();
+    closeDoneCard();
+    return;
+  }
+  // 브라우저 단축키(F5, Cmd/Ctrl 조합, 개발자도구)는 그대로 통과시킨다
+  if (e.metaKey || e.ctrlKey || e.altKey || /^F\d+$/.test(e.key)) return;
+  e.preventDefault();
+
+  light(e.code, true);
+  if (!mappedCodes.has(e.code)) session.unmapped++;
+  session.keystrokes++;
+
+  // 문장을 다 친 상태. 스페이스로 넘어가고, 백스페이스로 되돌아가 수정한다.
+  // 넘어가는 스페이스는 tLast를 갱신하지 않는다 — 입력 시간에 들어가면 안 된다.
+  if (locked){
+    if (e.key === ' '){
+      noteKey('next', e.code, '\u2423\u2192', '');   // 문장을 넘기는 스페이스
+      commitPhrase();
+      nextPhrase();
+    } else if (e.key === 'Backspace'){
+      locked = false;
+      $('test').classList.remove('done');
+      tLast = performance.now();
+      typed = typed.slice(0, -1);
+      session.backspaces++;
+      pKeys++; pBack++;
+      noteKey('bksp', e.code, '\u232b', typed.length);
+      render();
+    }
+    return;
+  }
+
+  const now = performance.now();
+  if (!tStart) tStart = now;
+  tLast = now;
+
+  if (e.key === 'Backspace'){
+    typed = typed.slice(0, -1);
+    session.backspaces++;
+    pKeys++; pBack++;
+    noteKey('bksp', e.code, '\u232b', typed.length);
+  } else if (e.key.length === 1){
+    typed += optLower.checked ? e.key.toLowerCase() : e.key;
+    pKeys++;
+    // 공백은 CSV에서 안 보이니 기호로 남긴다
+    noteKey('char', e.code, typed[typed.length - 1] === ' ' ? '\u2423' : typed[typed.length - 1],
+            typed.length - 1);
+  } else {
+    noteKey('other', e.code, e.key, '');
+    updateStats();
+    return;   // Shift/Enter/Tab 등은 입력에 반영하지 않는다
+  }
+
+  render();
+  if (typed.length >= target.length) completePhrase();
+}, {passive:false});
+
+addEventListener('keyup', e => { if (inTuner(e.target)) return; light(e.code, false); });
+addEventListener('blur', () => capByCode.forEach((_, c) => light(c, false)));
+
+/* ══ 컨트롤 ═════════════════════════════════════════════════════════ */
+// 다 친 뒤에 누르면 스페이스와 똑같이 기록하고 넘어간다. 아직 덜 쳤으면 그냥 건너뛴다.
+$('btn-next').onclick  = () => { if (locked) commitPhrase(); nextPhrase(); };
+$('btn-retry').onclick = () => { loadPhrase(); };
+$('btn-reset').onclick = () => {
+  session = { wpm: [], acc: [], keystrokes: 0, backspaces: 0, unmapped: 0,
+              offSum: 0, offN: 0 };
+  buildOrder(); loadPhrase();
+};
+optRand.onchange  = () => { buildOrder(); loadPhrase(); };
+optLower.onchange = () => loadPhrase();
+
+// 버튼을 누른 뒤에도 키 입력이 페이지로 오도록 포커스를 뺀다.
+// 위임으로 거는 이유: 튜너 패널의 버튼들은 스크립트가 나중에 만든다.
+document.addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('button');
+  if (b) b.blur();
+});
+
+setInterval(() => { if (tStart && !locked) updateStats(); }, 100);
+
+buildOrder();
+loadPhrase();
+updateLogUI();
+</script>
+
+<script>
+/* ══════════════════════════════════════════════════════════════════════════════
+   햅틱 튜너 — vcm-tune 펌웨어와 Web Serial로 붙어 세 스케치의 튜너블을 한 자리에서
+   실시간으로 바꾼다. mode 0은 위치 의존만 없앤 "동일 햅틱" 베이스라인이다.
+   위 타이핑 테스트와는 전역을 공유하지 않도록 IIFE로 싸둔다 (light() / mapped 만 읽는다).
+
+   프로토콜은 vcm-tune.ino 헤더 참고:
+     보내기 : set <name> <v> / get / defaults <0|1|2> / save / load / hid <0|1>
+     받기   : #cfg #ok #err #probe #rel #tel #hid  (기계가 읽는 줄은 전부 '#'로 시작)
+
+   기기가 없어도 값 편집과 #define 스니펫 생성은 그대로 동작한다.
+   ══════════════════════════════════════════════════════════════════════════════ */
+(function(){
+"use strict";
+
+const $ = id => document.getElementById(id);
+
+const KEY_HALF_MM = 8.5; // keyAt()이 edge를 정규화할 때 쓰는 키 반높이
+
+/* ── 파라미터 정의 ────────────────────────────────────────────────────────────
+   k      : 펌웨어 이름 (set <k> <v>)
+   def    : #define 이름. 스니펫을 만들 때 쓴다 (null이면 스케치에 없는 값)
+   modes  : 이 파라미터가 실제로 쓰이는 모드. 나머지 모드에서는 흐리게 표시한다
+   dec/f  : 표시 소수 자리 / 스니펫에 f 접미사를 붙일지 */
+const MODES = [
+  {v:0, name:'equal-haptic', desc:''},
+  {v:1, name:'vcm-position', desc:''},
+  {v:2, name:'vcm-force', desc:''},
+  {v:3, name:'beta-vibration', desc:'클릭은 mode 0과 동일 — 위치는 진동으로만'},
+];
+
+const PARAMS = [
+  {k:'fPeak',      g:'curve', def:'F_PEAK',        label:'F_PEAK',      min:20,  max:600, step:1,    dec:0},
+  {k:'fValley',    g:'curve', def:'F_VALLEY',      label:'F_VALLEY',    min:0,   max:600, step:1,    dec:0},
+  {k:'fEnd',       g:'curve', def:'F_END',         label:'F_END',       min:1,   max:600, step:1,    dec:0},
+  {k:'zPeak',      g:'curve', def:'Z_PEAK',        label:'Z_PEAK',      min:0,   max:1,   step:0.01, dec:2},
+  {k:'zValley',    g:'curve', def:'Z_VALLEY',      label:'Z_VALLEY',    min:0,   max:1,   step:0.01, dec:2},
+  {k:'zEnd',       g:'curve', def:'Z_END',         label:'Z_END',       min:0,   max:1,   step:0.01, dec:2},
+
+  {k:'deadband',   g:'pos', def:'EDGE_DEADBAND',   label:'EDGE_DEADBAND', min:0, max:0.95, step:0.01, dec:2, f:true, mm:true, modes:[1,2,3],
+   hint:'이 안쪽은 전부 중심 취급.'},
+  {k:'gainMin',    g:'pos', def:'KEY_GAIN_MIN',    label:'KEY_GAIN_MIN',  min:0, max:1,    step:0.01, dec:2, f:true, modes:[1],
+   hint:'키캡 경계에서의 클릭 세기(중심 1.0). 1.0이면 위치 의존이 사라진다'},
+  {k:'ampCurve',   g:'pos', def:'AMP_CURVE',       label:'AMP_CURVE',     min:0.3, max:4,  step:0.05, dec:2, f:true, modes:[1],
+   nmin:0.01, nmax:100,
+   hint:'1.0=선형. 크게 잡을수록 중심 바로 바깥에서 급격히 죽고 가장자리는 평평. 1 미만은 반대.'},
+  {k:'fEdgeScale', g:'pos', def:'F_EDGE_SCALE',    label:'F_EDGE_SCALE',  min:1, max:100,  step:0.1,  dec:1, f:true, modes:[2],
+   hint:'키캡 경계에서의 임계힘 배수.'},
+  {k:'fEdgeCurve', g:'pos', def:'F_EDGE_CURVE',    label:'F_EDGE_CURVE',  min:0.3, max:4,  step:0.05, dec:2, f:true, modes:[2],
+   nmin:0.01, nmax:100,
+   hint:'1.0=선형. 크게 잡을수록 중심 바로 바깥에서 급격히 무거워지고 가장자리는 평평. 1 미만은 반대.'},
+
+  /* ── mode 3 (beta) ──────────────────────────────────────────────────────────
+     클릭 곡선은 mode 0과 완전히 같게 두고 진동만 위치에 따라 바꾼다. 그래서
+     "키가 안 눌린다"(mode 2)도 "눌렸는지 흐려진다"(mode 1)도 생기지 않는다. */
+  {k:'vibWhen',    g:'vib', def:'VIB_WHEN',   label:'VIB_WHEN', type:'seg', dec:0, modes:[3],
+   opts:[{v:0, label:'누를 때'}, {v:1, label:'뗄 때'}, {v:2, label:'누를 때+뗄 때'}],
+   hint:'세 값 모두 그 순간 VIB_DUR 길이의 버스트 한 번씩이다. 누르고 있는 동안 계속 울리는 지속음은 없다 — 몇 백 ms면 수용기가 적응해 세기 단서가 사라지고, 겹쳐 눌린 두 키의 진동이 섞인다.'},
+  {k:'vibCenter',  g:'vib', def:'VIB_CENTER', label:'VIB_CENTER', min:0, max:1000, step:1, dec:0, modes:[3],
+   hint:'키 중심에서의 진동 세기. 1000 = 듀티 1.0. 0이면 똑바로 쳤을 때 조용하다.'},
+  {k:'vibEdge',    g:'vib', def:'VIB_EDGE',   label:'VIB_EDGE',   min:0, max:1000, step:1, dec:0, modes:[3],
+   hint:'키캡 경계에서의 진동 세기. CENTER보다 작게 넣으면 반대로 중심에서만 울린다.'},
+  {k:'vibCurve',   g:'vib', def:'VIB_CURVE',  label:'VIB_CURVE',  min:0.3, max:4, step:0.05, dec:2, f:true, modes:[3],
+   nmin:0.01, nmax:100,
+   hint:'1.0=선형. 크게 잡을수록 중심 바로 바깥에서 급격히 세지고 가장자리는 평평. 1 미만은 반대.'},
+  {k:'vibFreq',    g:'vib', def:'VIB_FREQ_HZ', label:'VIB_FREQ_HZ', min:10, max:500, step:1, dec:0, modes:[3],
+   hint:'220 근처 권장. 누르는 중엔 손가락 임피던스가 높아 변위가 잘 안 나므로, 변위가 아니라 힘으로 느끼는 파치니 대역(150~300Hz)을 써야 한다. 이 바가 그 대역까지 따라오는지는 "계속 울리기"를 켜놓고 이 슬라이더를 훑어 확인할 수 있다.'},
+  {k:'vibDur',     g:'vib', def:'VIB_DUR_MS',   label:'VIB_DUR_MS',   min:5, max:500, step:1, dec:0, modes:[3],
+   hint:'버스트 길이(ms). 세 VIB_WHEN 모두에 적용된다.'},
+  {k:'vibDelay',   g:'vib', def:'VIB_DELAY_MS', label:'VIB_DELAY_MS', min:0, max:300, step:1, dec:0, modes:[3],
+   hint:'버클링 후 발사까지 기다리는 시간(ms). 클릭 트랜지언트의 순방향 마스킹이 20~50ms 가므로 0이면 진동이 클릭에 묻힌다. 뗄 때는 경쟁 트랜지언트가 없어 0도 된다.'},
+
+  {k:'calOX',      g:'sys', def:'CAL_OX',      label:'CAL_OX',      min:-60, max:60, step:0.1, dec:1, f:true, hint:'센서 원점 보정 X (mm). 오버레이가 밀렸을 때'},
+  {k:'calOY',      g:'sys', def:'CAL_OY',      label:'CAL_OY',      min:-60, max:60, step:0.1, dec:1, f:true},
+];
+
+/* 세 조건의 기본값. 펌웨어 applyDefaults()와 같은 표를 UI에도 둔다 —
+   기기 없이도 곡선을 미리 볼 수 있어야 하기 때문이다. 곡선은 세 조건이 공유하고
+   mode 는 그걸 위치에 따라 어떻게 비틀지만 정한다 (mode 0은 안 비튼다). */
+function defaultsFor(mode){
+  return {
+    mode: mode,
+    fPeak:100, fValley:70, fEnd:90,
+    zPeak:0.50, zValley:0.80, zEnd:1.00,
+    deadband: 0.0,
+    fEdgeScale:3.0, fEdgeCurve:1.0,
+    gainMin:0.1, ampCurve:2.0,
+    // mode 3. 중심 0 = 똑바로 치면 조용하고 빗겨 칠수록 울린다 (교정 피드백 방향)
+    vibWhen:0, vibCenter:0, vibEdge:400, vibCurve:1.0,
+    vibFreq:220, vibDur:60, vibDelay:50,
+    calOX:-18.8, calOY:23.0,
+    hid:1,
+  };
+}
+
+/* 저장된 값의 mode 번호를 지금 체계로 맞춘다.
+   schema 2: position/force/combined 가 1/2/3으로 밀리고 0이 "햅틱 없음"이 됐다.
+   schema 3: 0의 뜻이 "동일 햅틱"으로 바뀌고 combined(3)가 사라졌다. 3은 갈 곳이
+             없으므로 0으로 되돌린다 — 없는 조건을 계속 들고 있는 것보다 낫다. */
+const TUNE_SCHEMA = 3;
+(function migrateStored(){
+  try {
+    if (+(localStorage.getItem('vcmTuneSchema') || 1) >= TUNE_SCHEMA) return;
+    const was = +(localStorage.getItem('vcmTuneSchema') || 1);
+    const bump = o => {
+      if (o && typeof o === 'object' && typeof o.mode === 'number') {
+        if (was < 2) o.mode = Math.min(3, o.mode + 1);
+        if (o.mode > 2) o.mode = 0;
+      }
+      return o;
+    };
+    const last = JSON.parse(localStorage.getItem('vcmTuneLast') || 'null');
+    if (last) localStorage.setItem('vcmTuneLast', JSON.stringify(bump(last)));
+    const ps = JSON.parse(localStorage.getItem('vcmTunePresets') || 'null');
+    if (ps && typeof ps === 'object') {
+      Object.keys(ps).forEach(k => bump(ps[k]));
+      localStorage.setItem('vcmTunePresets', JSON.stringify(ps));
+    }
+    localStorage.setItem('vcmTuneSchema', String(TUNE_SCHEMA));
+  } catch(e) {}
+})();
+
+let V = defaultsFor(0);
+try {
+  const last = JSON.parse(localStorage.getItem('vcmTuneLast') || 'null');
+  if (last && typeof last === 'object') V = Object.assign(V, last);
+} catch(e) {}
+
+/* ── UI 만들기 ────────────────────────────────────────────────────────────────*/
+const rows = new Map();     // k -> {wrap, range, num}
+const touched = new Map();  // k -> 마지막으로 사람이 만진 시각 (기기 에코와 싸우지 않게)
+
+function buildModes(){
+  const box = $('t-modes');
+  MODES.forEach(m => {
+    const d = document.createElement('div');
+    d.className = 'mode';
+    d.innerHTML = `<b>${m.name} <span style="color:var(--dimmer);font-weight:400">· mode ${m.v}</span></b>
+                   <div class="md">${m.desc}</div>`;
+    d.onclick = () => setMode(m.v);
+    box.appendChild(d);
+    m.el = d;
+  });
+}
+
+function buildParams(){
+  PARAMS.forEach(p => {
+    // 값이 몇 개 안 되는 "고르는" 파라미터는 슬라이더가 아니라 버튼으로 낸다.
+    // 0/1/2를 슬라이더로 끄는 건 무엇을 고른 건지 손으로도 눈으로도 안 보인다.
+    if (p.type === 'seg') { buildSeg(p); return; }
+    // nmin/nmax가 있는 파라미터는 숫자칸이 슬라이더보다 넓은 범위를 받는다.
+    // 슬라이더는 흔히 쓰는 구간만 덮고, 그 밖의 값은 숫자로 직접 넣는다
+    // (슬라이더는 끝에 붙은 채로 남는다 — 값 자체는 그대로 유지된다).
+    const free = p.nmin != null || p.nmax != null;
+    const nmin = p.nmin != null ? p.nmin : p.min;
+    const nmax = p.nmax != null ? p.nmax : p.max;
+    const wrap = document.createElement('div');
+    wrap.className = 'prow';
+    wrap.innerHTML =
+      `<div class="plab"><span class="pn">${p.label}</span>` +
+      (p.mm ? `<span class="pmm" data-mm></span>` : '') +
+      `<input type="number" step="${free ? 'any' : p.step}" min="${nmin}" max="${nmax}"></div>` +
+      `<input type="range" step="${p.step}" min="${p.min}" max="${p.max}">` +
+      (p.hint ? `<div class="phint">${p.hint}</div>` +
+                (free ? `<div class="phint">숫자칸은 ${nmin} ~ ${nmax}까지 (슬라이더 범위 밖도 가능)</div>` : '')
+              : '');
+    $('g-' + p.g).appendChild(wrap);
+
+    const num = wrap.querySelector('input[type=number]');
+    const rng = wrap.querySelector('input[type=range]');
+    const onEdit = src => {
+      let v = parseFloat(src.value);
+      if (!isFinite(v)) return;
+      // 슬라이더로 만졌으면 슬라이더 범위, 숫자칸으로 쳤으면 넓은 범위로 자른다
+      const lo = src === num ? nmin : p.min, hi = src === num ? nmax : p.max;
+      v = Math.min(hi, Math.max(lo, v));
+      if (src === num && p.dec != null) v = Number(v.toFixed(p.dec));
+      touched.set(p.k, performance.now());
+      apply(p.k, v, true);
+    };
+    rng.addEventListener('input', () => onEdit(rng));
+    num.addEventListener('input',  () => onEdit(num));
+    rows.set(p.k, {wrap, num, rng, p});
+  });
+
+}
+
+function buildSeg(p){
+  const wrap = document.createElement('div');
+  wrap.className = 'prow';
+  wrap.innerHTML =
+    `<div class="plab"><span class="pn">${p.label}</span></div>` +
+    `<div class="pseg">` +
+      p.opts.map(o => `<button type="button" data-v="${o.v}">${o.label}</button>`).join('') +
+    `</div>` +
+    (p.hint ? `<div class="phint">${p.hint}</div>` : '');
+  $('g-' + p.g).appendChild(wrap);
+
+  const btns = Array.from(wrap.querySelectorAll('.pseg button'));
+  btns.forEach(b => b.onclick = () => {
+    touched.set(p.k, performance.now());
+    apply(p.k, +b.dataset.v, true);
+  });
+  rows.set(p.k, {wrap, seg: btns, p});
+}
+
+// 값 하나를 상태에 반영한다. send=true면 기기로도 내보낸다.
+function apply(k, v, send){
+  V[k] = v;
+  syncRow(k);
+  refresh();
+  if (send) queueSend(k, v);
+  saveLast();
+  if (send) document.dispatchEvent(new CustomEvent('vcm-tuned', {detail:k}));
+}
+
+function syncRow(k){
+  const r = rows.get(k);
+  if (!r) return;
+  const v = V[k];
+  if (r.seg) { r.seg.forEach(b => b.classList.toggle('on', +b.dataset.v === +v)); return; }
+  if (r.cb) { r.cb.checked = !!v; return; }
+  const s = r.p.dec != null ? Number(v).toFixed(r.p.dec) : String(v);
+  if (document.activeElement !== r.num) r.num.value = s;
+  r.rng.value = v;   // 슬라이더 범위 밖이면 브라우저가 끝으로 붙인다
+  r.wrap.classList.toggle('oor', v < r.p.min || v > r.p.max);
+  const mm = r.wrap.querySelector('[data-mm]');
+  if (mm) mm.textContent = '± ' + (v * KEY_HALF_MM).toFixed(1) + ' mm';
+}
+
+// silent=true: 시작할 때 UI만 맞추는 호출. 기기로 내보내지도, "사람이 만졌다"고
+// 표시하지도 않는다 (표시하면 연결 직후 기기 값이 무시된다).
+function setMode(m, silent){
+  if (!silent) touched.set('mode', performance.now());
+  V.mode = m;
+  MODES.forEach(x => x.el.classList.toggle('sel', x.v === m));
+  PARAMS.forEach(p => {
+    const r = rows.get(p.k);
+    if (r && r.wrap) r.wrap.classList.toggle('off', !!p.modes && !p.modes.includes(m));
+  });
+  refresh();
+  if (!silent) queueSend('mode', m);
+  saveLast();
+}
+
+// 전체 UI 재계산 (곡선 + 스니펫). 값이 바뀔 때마다 부른다.
+function refresh(){
+  MODES.forEach(x => x.el.classList.toggle('sel', x.v === V.mode));
+  PARAMS.forEach(p => {
+    const r = rows.get(p.k);
+    if (r && r.wrap) r.wrap.classList.toggle('off', !!p.modes && !p.modes.includes(V.mode));
+  });
+  buildSnippet();
+}
+
+function saveLast(){
+  try { localStorage.setItem('vcmTuneLast', JSON.stringify(V)); } catch(e) {}
+}
+
+/* ── Web Serial ───────────────────────────────────────────────────────────────*/
+let port = null, writer = null, reader = null, rxBuf = '';
+let keepReading = false, readDone = null;
+const enc = new TextEncoder();
+
+function status(txt, cls){
+  const s = $('t-status');
+  s.textContent = txt;
+  s.className = 'tstat' + (cls ? ' ' + cls : '');
+}
+
+// 기기로 마지막에 보낸 값. 기기가 자기 범위로 잘랐는지 에코와 대조하는 데 쓴다.
+const sentVal = new Map();
+
+async function write(line){
+  if (!writer) { logLine('#err 미연결 — 안 보냄: ' + line); return; }
+  const m = /^set (\w+) (\S+)$/.exec(line);
+  if (m) sentVal.set(m[1], parseFloat(m[2]));
+  try { await writer.write(enc.encode(line + '\n')); }
+  catch(e) { logLine('#err write: ' + e.message); }
+}
+
+const pending = new Map();
+let flushTimer = null;
+let syncTimer  = null;
+function queueSend(k, v){
+  pending.set(k, v);
+  if (!flushTimer) flushTimer = setTimeout(flushSend, 40);   // 슬라이더를 끌 때 폭주 방지
+}
+function flushSend(){
+  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+  pending.forEach((v, k) => write('set ' + k + ' ' + v));
+  pending.clear();
+  // 편집이 멎으면 기기 값으로 화면을 대조한다. set 의 '#ok' 에코는 만진 직후
+  // (touched 600ms 안)라 adopt()가 무시하므로, 기기가 값을 자르면 화면에는
+  // 넣은 값이 그대로 남는다 — 그 상태로 저장하면 EEPROM에는 잘린 값이 들어가고
+  // 재부팅 뒤에 "저장이 안 됐다"로 보인다. 800ms 뒤 get 이 그 어긋남을 드러낸다.
+  if (syncTimer) clearTimeout(syncTimer);
+  if (writer) syncTimer = setTimeout(() => { syncTimer = null; write('get'); }, 800);
+}
+// 큐에 남은 set 을 지금 당장 내보낸다. 'save' 같은 명령은 큐를 거치지 않고
+// 바로 나가므로, 이걸 먼저 부르지 않으면 방금 바꾼 값보다 먼저 도착한다.
+function flushNow(){ if (pending.size) flushSend(); }
+
+async function connect(){
+  if (!('serial' in navigator)) {
+    status('Web Serial 미지원 — Chrome/Edge에서 열 것', 'err');
+    logLine('#err 이 브라우저에는 navigator.serial 이 없다. Chrome 계열에서 열거나 ' +
+            'file:// 이 막히면 `python3 -m http.server` 로 띄운 뒤 localhost로 접속할 것.');
+    return;
+  }
+  if (port) { await disconnect(); return; }
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+    writer = port.writable.getWriter();
+    status('연결됨', 'on');
+    $('t-connect').textContent = '연결 끊기';
+    keepReading = true;
+    readDone = readLoop();
+    setTimeout(() => { write('set probe 1'); write('get'); }, 120);  // 기기 값으로 UI를 맞춘다
+                                              // probe는 타건 편심 기록에 필요하다
+  } catch(e) {
+    port = null;
+    status('연결 실패', 'err');
+    logLine('#err ' + e.message);
+  }
+}
+
+async function disconnect(){
+  keepReading = false;                                  // 읽기 루프를 먼저 멈춘다
+  try { if (reader) await reader.cancel(); } catch(e) {}
+  try { await readDone; } catch(e) {}                   // 루프가 락을 놓을 때까지 기다린다
+  try { if (writer) writer.releaseLock(); } catch(e) {}
+  try { if (port) await port.close(); } catch(e) {}
+  port = writer = reader = null; readDone = null;
+  status('미연결');
+  $('t-connect').textContent = '기기 연결';
+}
+
+async function readLoop(){
+  const dec = new TextDecoder();
+  try {
+    while (port && port.readable && keepReading) {
+      reader = port.readable.getReader();
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          rxBuf += dec.decode(value, { stream:true });
+          let i;
+          while ((i = rxBuf.indexOf('\n')) >= 0) {
+            const line = rxBuf.slice(0, i).replace(/\r$/, '');
+            rxBuf = rxBuf.slice(i + 1);
+            if (line) handleLine(line);
+          }
+        }
+      } finally { reader.releaseLock(); reader = null; }
+    }
+  } catch(e) {
+    keepReading = false;
+    logLine('#err read: ' + e.message);
+    status('연결 끊김', 'err');
+    $('t-connect').textContent = '기기 연결';
+    port = writer = null;
+  }
+}
+
+// "a=1 b=2" -> {a:'1', b:'2'}
+function kvPairs(s){
+  const o = {};
+  s.trim().split(/\s+/).forEach(tok => {
+    const j = tok.indexOf('=');
+    if (j > 0) o[tok.slice(0, j)] = tok.slice(j + 1);
+  });
+  return o;
+}
+
+// 기기가 보낸 값을 UI에 반영한다. 방금 사람이 만진 항목은 건드리지 않는다 —
+// 슬라이더를 끄는 중에 에코가 되돌아오면 손가락과 싸운다.
+function adopt(k, raw){
+  const v = parseFloat(raw);
+  if (!isFinite(v)) return;
+  const t = touched.get(k);
+  if (t != null && performance.now() - t < 600) return;
+  const s = sentVal.get(k);
+  if (s != null) {
+    if (Math.abs(s - v) > 1e-6)
+      logLine('#err ' + k + ': 보낸 값 ' + s + ' 을 기기가 ' + v +
+              ' 로 잘랐다 — 화면을 기기 값으로 맞춘다 (펌웨어 TUNABLES 범위)');
+    sentVal.delete(k);
+  }
+  if (k === 'mode') { V.mode = v|0; }
+  else V[k] = v;
+  syncRow(k);
+}
+
+function handleLine(line){
+  if (line.startsWith('#cfg ') || line.startsWith('#ok ')) {
+    const body = line.slice(line.indexOf(' ') + 1);
+    const kv = kvPairs(body);
+    Object.keys(kv).forEach(k => adopt(k, kv[k]));
+    if (kv.hid !== undefined) syncHidButton();
+    refresh();
+    logLine(line);
+    return;
+  }
+  if (line.startsWith('#tel ')) { handleTel(kvPairs(line.slice(5))); logLine(line, true); return; }
+  // #rel = 그 타건을 뗀 순간. fmax = 누르고 있는 동안의 최대 힘.
+  if (line.startsWith('#rel ')) {
+    const kv = kvPairs(line.slice(5));
+    dispatchEvent(new CustomEvent('vcm-release', {detail:{
+      key:kv.key, fmax:parseFloat(kv.fmax), th:parseFloat(kv.th),
+    }}));
+    logLine(line);
+    return;
+  }
+  // #probe = 버클링(사람이 클릭을 느끼는 그 순간) 한 번. edge/mm이 그 타건의 편심이다.
+  // 타이핑 로그가 가져다 쓸 수 있게 이벤트로 흘린다.
+  if (line.startsWith('#probe ')) {
+    const kv = kvPairs(line.slice(7));
+    dispatchEvent(new CustomEvent('vcm-press', {detail:{
+      key:kv.key, edge:parseFloat(kv.edge), mm:parseFloat(kv.mm), eff:parseFloat(kv.eff),
+      th:parseFloat(kv.th), gain:parseFloat(kv.gain), f:parseFloat(kv.f),
+    }}));
+    logLine(line);
+    return;
+  }
+  logLine(line);
+}
+
+/* ── 라이브 텔레메트리 ────────────────────────────────────────────────────────
+   "#tel l=<keyIdx>,<edge>,<force>,<peak>,<gain> r=... dl= dr= n= drop="
+   keyIdx는 keymap.h의 KEYS[] 인덱스인데, 이 파일 위쪽 mapped[]가 같은 순서라
+   그대로 event.code로 바꿔 키보드 그림에 표시할 수 있다. */
+let telLit = [null, null];
+
+function telSide(tag, s, ids){
+  const p = (s || '').split(',');
+  const ki = parseInt(p[0], 10), edge = parseFloat(p[1]), f = parseFloat(p[2]), th = parseFloat(p[3]);
+  // p[5] = 지금 이 접촉 위치에서 나갈 진동 진폭(듀티). 실제로 울리고 있는지가
+  // 아니라 "지금 누르면 이만큼"이다 — 슬라이더를 끌면서 위치별 세기를 볼 수 있다.
+  const vib = parseFloat(p[5]);
+  $(ids.vib).innerHTML = (isFinite(vib) && ki >= 0 && V.mode === 3)
+    ? Math.round(vib * 1000) + '<small> / 1000</small>' : '–';
+  const name = (ki >= 0 && ki < mapped.length) ? mapped[ki][0] : (ki >= 0 ? '#' + ki : '–');
+  $(ids.key).textContent = name;
+  $(ids.f).innerHTML = isFinite(f)
+    ? Math.round(f) + '<small> / ' + Math.round(th) + '</small>' : '–';
+  $(ids.e).innerHTML = (isFinite(edge) && ki >= 0)
+    ? (edge * KEY_HALF_MM).toFixed(1) + '<small> mm</small>' : '–';
+  $(ids.bar).style.width = Math.max(0, Math.min(100, (f / th) * 100)) + '%';
+  $(ids.bar).style.background = f >= th ? 'var(--ok)' : 'var(--accent)';
+
+  const code = (ki >= 0 && ki < mapped.length) ? mapped[ki][1] : null;
+  const slot = tag === 'l' ? 0 : 1;
+  if (telLit[slot] !== code) {
+    ringKey(telLit[slot], false);
+    ringKey(code, true);
+    telLit[slot] = code;
+  }
+}
+
+function ringKey(code, on){
+  if (!code) return;
+  const c = capByCode.get(code);
+  if (c) c[0].classList.toggle('telit', on);
+}
+
+function handleTel(kv){
+  telSide('l', kv.l, {key:'lv-lkey', f:'lv-lf', e:'lv-le', bar:'lv-lbar', vib:'lv-lv'});
+  telSide('r', kv.r, {key:'lv-rkey', f:'lv-rf', e:'lv-re', bar:'lv-rbar', vib:'lv-rv'});
+  $('lv-drop').textContent = kv.drop !== undefined ? kv.drop : '–';
+}
+
+/* ── 로그 ─────────────────────────────────────────────────────────────────────*/
+const logEl2 = $('t-log');
+function logLine(line, isTel){
+  if (isTel && !$('t-showtel').checked) return;
+  const d = document.createElement('div');
+  d.className = line.startsWith('#cfg') ? 'lcfg'
+              : line.startsWith('#ok')  ? 'lok'
+              : line.startsWith('#err') ? 'lerr'
+              : line.startsWith('#probe') || line.startsWith('#rel') ? 'lprobe' : 'ltx';
+  d.textContent = line;
+  const atBottom = logEl2.scrollTop + logEl2.clientHeight >= logEl2.scrollHeight - 24;
+  logEl2.appendChild(d);
+  while (logEl2.childNodes.length > 400) logEl2.removeChild(logEl2.firstChild);
+  if (atBottom) logEl2.scrollTop = logEl2.scrollHeight;
+}
+
+/* ── 서랍 열고 닫기 ───────────────────────────────────────────────────────────
+   튜너는 평소 접혀 있다. 열려 있는 동안에도 오른쪽 타이핑 테스트는 그대로 보이고
+   키 입력도 그대로 간다 — 튜너 안의 입력칸에 포커스가 있을 때만 테스트가 비켜준다
+   (위 스크립트의 inTuner()). */
+const drawer = $('tuner'), scrim = $('t-scrim');
+
+function openDrawer(on){
+  drawer.classList.toggle('open', on);
+  scrim.classList.toggle('open', on);
+  $('t-open').setAttribute('aria-expanded', on ? 'true' : 'false');
+}
+
+$('t-open').onclick  = () => openDrawer(true);
+$('t-close').onclick = () => openDrawer(false);
+scrim.onclick        = () => openDrawer(false);
+
+// Esc로 닫는다. 타이핑 테스트가 문서 전체의 키를 먹으므로 캡처 단계에서 가로챈다.
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || !drawer.classList.contains('open')) return;
+  e.stopPropagation(); e.preventDefault();
+  openDrawer(false);
+}, true);
+
+
+/* ── #define 스니펫 ───────────────────────────────────────────────────────────
+   튜닝이 끝나면 이 블록을 해당 원본 스케치에 그대로 옮겨 적는다. 모드마다 그
+   스케치에 실제로 존재하는 상수만 뽑는다. */
+const SNIP = {
+  // mode 0은 위치 의존 상수가 없다. 곡선만 다른 조건과 맞추면 된다.
+  0: ['F_PEAK','F_VALLEY','F_END','Z_PEAK','Z_VALLEY','Z_END'],
+  1: ['F_PEAK','F_VALLEY','F_END','Z_PEAK','Z_VALLEY','Z_END',
+      'KEY_GAIN_MIN','AMP_CURVE','EDGE_DEADBAND'],
+  2: ['F_PEAK','F_VALLEY','F_END','Z_PEAK','Z_VALLEY','Z_END',
+      'EDGE_DEADBAND','F_EDGE_SCALE','F_EDGE_CURVE'],
+  // mode 3은 클릭 곡선이 mode 0과 같고 위치는 진동으로만 나간다.
+  3: ['F_PEAK','F_VALLEY','F_END','Z_PEAK','Z_VALLEY','Z_END',
+      'EDGE_DEADBAND','VIB_WHEN','VIB_CENTER','VIB_EDGE','VIB_CURVE',
+      'VIB_FREQ_HZ','VIB_DUR_MS','VIB_DELAY_MS'],
+};
+
+function snippetText(){
+  const byDef = {};
+  PARAMS.forEach(p => { if (p.def) byDef[p.def] = p; });
+  const names = SNIP[V.mode];
+  const wid = Math.max.apply(null, names.map(n => n.length));
+  const lines = names.map(n => {
+    const p = byDef[n];
+    let v = Number(V[p.k]).toFixed(p.dec);
+    if (p.f) v += 'f';
+    return '#define ' + n.padEnd(wid + 1) + v;
+  });
+  const head = V.mode === 0
+    ? '// 동일 햅틱(mode 0) — 위치 의존 상수 없이 곡선만'
+    : V.mode === 3
+    // beta는 아직 단독 스케치가 없다. 확정된 조건을 그대로 적어두는 기록용이다.
+    ? '// beta(mode 3) — 클릭은 mode 0과 동일, 위치는 진동으로만.\n' +
+      '// VIB_WHEN 0=누를 때 1=뗄 때 2=누를 때+뗄 때'
+    : '// ' + MODES[V.mode].name + '.ino 에 옮겨 적을 값';
+  return head + '\n' + lines.join('\n');
+}
+function buildSnippet(){ $('t-snippet').textContent = snippetText(); }
+
+/* ── 프리셋 ───────────────────────────────────────────────────────────────────*/
+function presets(){
+  try { return JSON.parse(localStorage.getItem('vcmTunePresets') || '{}'); } catch(e) { return {}; }
+}
+function savePresets(o){ localStorage.setItem('vcmTunePresets', JSON.stringify(o)); }
+function refreshPresetList(){
+  const sel = $('t-plist'), o = presets(), keys = Object.keys(o).sort();
+  sel.innerHTML = keys.length ? '' : '<option value="">(저장된 프리셋 없음)</option>';
+  keys.forEach(k => {
+    const op = document.createElement('option');
+    op.value = k; op.textContent = k;
+    sel.appendChild(op);
+  });
+}
+
+/* ── 버튼 ─────────────────────────────────────────────────────────────────────*/
+function syncHidButton(){
+  const b = $('t-hid');
+  b.textContent = V.hid ? 'HID 타이핑 끄기' : 'HID 타이핑 켜기';
+  b.classList.toggle('danger', !!V.hid);
+}
+
+function pushAll(){
+  PARAMS.forEach(p => write('set ' + p.k + ' ' + V[p.k]));
+  write('set mode ' + V.mode);
+  write('set hid ' + V.hid);
+}
+
+$('t-connect').onclick  = connect;
+$('t-get').onclick      = () => { flushNow(); write('get'); };
+$('t-push').onclick     = () => { flushNow(); pushAll(); };
+$('t-defaults').onclick = () => {
+  const keepHid = V.hid;
+  V = Object.assign(defaultsFor(V.mode), { hid: keepHid });
+  PARAMS.forEach(p => syncRow(p.k));
+  syncHidButton(); refresh(); saveLast();
+  write('defaults ' + V.mode);
+};
+$('t-eesave').onclick = () => { flushNow(); write('save'); write('get'); };
+$('t-eeload').onclick = () => { flushNow(); write('load'); };
+$('t-hid').onclick    = () => { touched.set('hid', performance.now()); V.hid = V.hid ? 0 : 1; syncHidButton(); write('set hid ' + V.hid); saveLast(); };
+$('t-clear').onclick  = () => { logEl2.textContent = ''; };
+
+/* 진동 테스트. 접촉·모드·버클링과 무관하게 바를 직접 흔든다 —
+   "안 느껴진다"가 액추에이터/주파수 문제인지 트리거 문제인지 가르는 용도다. */
+let vibHolding = false;
+$('t-vibtest').onclick = () => {
+  write('vib ' + Math.max(1, V.vibEdge || 400) + ' ' + V.vibDur);
+};
+$('t-vibhold').onclick = () => {
+  vibHolding = !vibHolding;
+  write(vibHolding ? ('vib ' + Math.max(1, V.vibEdge || 400) + ' 0') : 'vib 0');
+  $('t-vibhold').classList.toggle('on', vibHolding);
+  $('t-vibhold').textContent = vibHolding ? '멈추기' : '계속 울리기';
+};
+// 계속 울리는 중에 주파수/세기를 만지면 그 자리에서 다시 걸어 준다 —
+// 슬라이더를 훑으면서 바가 어디까지 따라오는지 손으로 바로 듣기 위한 것.
+// (vibFreq 는 펌웨어가 매 루프 P.vibFreq 를 읽으므로 사실 다시 안 걸어도 되지만,
+//  vibEdge 는 발사 순간의 값으로 고정되므로 다시 걸어야 반영된다.)
+document.addEventListener('vcm-tuned', e => {
+  if (!vibHolding || (e.detail !== 'vibEdge' && e.detail !== 'vibFreq')) return;
+  write('vib ' + Math.max(1, V.vibEdge || 400) + ' 0');
+});
+
+$('t-psave').onclick = () => {
+  const n = ($('t-pname').value || '').trim();
+  if (!n) { logLine('#err 프리셋 이름을 넣을 것'); return; }
+  const o = presets(); o[n] = Object.assign({}, V); savePresets(o);
+  refreshPresetList(); $('t-plist').value = n;
+  logLine('#ok 프리셋 저장: ' + n);
+};
+$('t-pload').onclick = () => {
+  const n = $('t-plist').value, o = presets();
+  if (!n || !o[n]) return;
+  V = Object.assign(defaultsFor(o[n].mode != null ? o[n].mode : 0), o[n]);
+  PARAMS.forEach(p => syncRow(p.k));
+  syncHidButton(); refresh(); saveLast();
+  pushAll();
+  logLine('#ok 프리셋 적용: ' + n);
+};
+$('t-pdel').onclick = () => {
+  const n = $('t-plist').value, o = presets();
+  if (!n || !o[n]) return;
+  delete o[n]; savePresets(o); refreshPresetList();
+  logLine('#ok 프리셋 삭제: ' + n);
+};
+$('t-copy').onclick = () => copy(snippetText(), '#define 스니펫');
+$('t-json').onclick = () => copy(JSON.stringify(V, null, 2), 'JSON');
+
+function copy(text, what){
+  const done = () => logLine('#ok ' + what + ' 클립보드에 복사됨');
+  if (navigator.clipboard && navigator.clipboard.writeText)
+    navigator.clipboard.writeText(text).then(done, () => logLine('#err 복사 실패'));
+  else logLine('#err 이 브라우저에서는 클립보드를 못 쓴다');
+}
+
+// 타이핑 로그가 "이 줄은 어떤 햅틱 설정이었나"를 같이 적을 수 있게 상태를 노출한다.
+window.vcmTuneState = () => Object.assign({}, V);
+
+/* ── 시작 ─────────────────────────────────────────────────────────────────────*/
+buildModes();
+buildParams();
+PARAMS.forEach(p => syncRow(p.k));
+syncHidButton();
+refreshPresetList();
+setMode(V.mode, true);
+refresh();
+if (!('serial' in navigator)) status('Web Serial 미지원 (Chrome/Edge 필요)', 'err');
+})();
+</script>
+</body>
+</html>
