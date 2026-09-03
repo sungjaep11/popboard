@@ -105,27 +105,73 @@ static const Key KEYS[] = {
 };
 static const int N_KEYS = sizeof(KEYS)/sizeof(KEYS[0]);
 
+// 현재 KEYS[]에 등록된 키캡에 붙은 실제 틈을 고른다.
+// 표준 키 피치(19.05mm) - 키캡 폭(17mm) = 약 2.05mm이므로,
+// 활성 키 경계에서 2.1mm 안쪽이면 틈으로 본다. 활성 키가 두 개
+// 가까워야 한다고 제한하면 행의 어괋난 끝, P–[/L–;/M–,과 같이
+// 한쪽이 미사용 키인 실제 틈, SPACE 주변의 일부가 통째로 빠진다.
+//
+// 키보드 전체 외곽은 KEYS[]의 최소/최대 경계로 한 번 더 잘라
+// 센서의 바깥 영역이 틈으로 울리지 않게 한다. 미사용 키캡 중심은
+// 활성 키 경계에서 한참 멀어 그대로 무음이고, 사이의 2mm 틈만 울린다.
+#define ACTIVE_GAP_HALO_MM 2.1f
+inline bool activeKeyGapAt(float sx, float sy) {
+  float lx = sx - CAL_OX;
+  float ly = sy - CAL_OY;
+  float minX = KEYS[0].cx - KEYS[0].hx;
+  float maxX = KEYS[0].cx + KEYS[0].hx;
+  float minY = KEYS[0].cy - KEYS[0].hy;
+  float maxY = KEYS[0].cy + KEYS[0].hy;
+  bool nearActiveKey = false;
+  for (int i = 0; i < N_KEYS; i++) {
+    float left = KEYS[i].cx - KEYS[i].hx;
+    float right = KEYS[i].cx + KEYS[i].hx;
+    float top = KEYS[i].cy - KEYS[i].hy;
+    float bottom = KEYS[i].cy + KEYS[i].hy;
+    if (left < minX) minX = left;
+    if (right > maxX) maxX = right;
+    if (top < minY) minY = top;
+    if (bottom > maxY) maxY = bottom;
+
+    float dx = lx - KEYS[i].cx; if (dx < 0.0f) dx = -dx;
+    float dy = ly - KEYS[i].cy; if (dy < 0.0f) dy = -dy;
+    if (dx < KEYS[i].hx + ACTIVE_GAP_HALO_MM &&
+        dy < KEYS[i].hy + ACTIVE_GAP_HALO_MM) nearActiveKey = true;
+  }
+  return nearActiveKey && lx >= minX && lx <= maxX && ly >= minY && ly <= maxY;
+}
+
 // 접촉(sensel mm) -> 눌린 키 인덱스와 "중심에서 얼마나 벗어났나"를 반환.
-//   반환 -1: 어떤 키캡에도 없음(갭) -> 호출부에서 햅틱 0 처리
+//   반환 -1: 어떤 키캡에도 없음(갭). 클릭은 막고, 활성 키 사이 틈만 진동한다.
 //   *edge: 0..1  (중심 0.0, 키캡 경계 1.0)
+//   *offX, *offY: 부호 있는 오프셋(mm). +x는 오른쪽, +y는 아래(사용자 쪽).
+//     edge 는 max(|offX|,|offY|) 꼴로 뭉갠 크기라 "어느 쪽으로" 빗나갔는지가
+//     사라진다. 키별 계통 편향(= 키 중심을 옮겨서 없앨 수 있는 성분)과 시행
+//     산포(= 못 없애는 성분)를 가르려면 부호가 있어야 하므로 따로 내보낸다.
+//     갭(반환 -1)에서는 어느 키 기준인지가 없으므로 둘 다 0 — edge=1.0 과 같은
+//     성격의 자리표시자다. 로그를 읽을 때 key="-" 인 줄은 offX/offY 를 버릴 것.
 //
 // keyboard/ 스케치는 여기서 곧바로 세기 gain(중심 1.0 -> 엣지 0.1)을 만들어
 // 돌려줬다. 이 스케치는 같은 거리로 진폭과 임계힘 둘 다를 만들어야 하므로,
 // 곡선을 씌우지 않은 정규화 거리 자체를 그대로 넘긴다. 곡선의 모양은
 // vcm-tune.ino의 ampGain() / forceScale() 에서 각각 정하고, 둘 중 무엇을 켤지는
 // 런타임 mode가 정한다 (0=진폭만 / 1=임계힘만 / 2=둘 다).
-inline int keyAt(float sx, float sy, float* edge) {
+inline int keyAt(float sx, float sy, float* edge, float* offX, float* offY) {
   float lx = sx - CAL_OX;
   float ly = sy - CAL_OY;
   for (int i = 0; i < N_KEYS; i++) {
-    float dx = lx - KEYS[i].cx;  if (dx < 0) dx = -dx;   // 중심에서의 |가로 거리|(mm)
-    float dy = ly - KEYS[i].cy;  if (dy < 0) dy = -dy;   // 중심에서의 |세로 거리|(mm)
+    float sx0 = lx - KEYS[i].cx;         // 부호 있는 가로 오프셋(mm). +는 오른쪽
+    float sy0 = ly - KEYS[i].cy;         // 부호 있는 세로 오프셋(mm). +는 아래
+    float dx = sx0 < 0 ? -sx0 : sx0;                     // 중심에서의 |가로 거리|(mm)
+    float dy = sy0 < 0 ? -sy0 : sy0;                     // 중심에서의 |세로 거리|(mm)
     if (dx < KEYS[i].hx && dy < KEYS[i].hy) {            // 키캡 안
       float m       = KEYS[i].hy;
       float plateau = KEYS[i].hx - m;     //넓은 키(SPACE/BACKSPACE) 가로 plateau 처리
       float ax = (dx > plateau) ? (dx - plateau) / m : 0.0f;
       float ay = dy / KEYS[i].hy;
       *edge = ax > ay ? ax : ay;
+      *offX = sx0;
+      *offY = sy0;
       return i;
     }
   }
@@ -133,7 +179,50 @@ inline int keyAt(float sx, float sy, float* edge) {
   // 키 중심보다 무른 구간이 돼서, 엣지를 칠 때 접촉 중심이 넘어가는 순간
   // 임계가 F_PEAK로 떨어져 엉뚱하게 버클링한다.
   *edge = 1.0f;
+  *offX = 0.0f;
+  *offY = 0.0f;
   return -1;
+}
+
+// 키 ki 의 중심에서 (offX, offY) mm 떨어진 자리의 정규화 거리. keyAt() 이 키캡
+// 안에서 쓰는 것과 같은 식인데 "키캡 안인가" 검사가 없다. 갭에서도 부르므로
+// 1.0 을 넘을 수 있고, 그 초과분이 곧 "키캡을 얼마나 벗어났나"다 —
+// 1.4 면 키 반높이의 1.4배, 즉 경계 밖으로 반높이의 0.4배만큼 나갔다는 뜻.
+inline float keyEdgeOf(int ki, float offX, float offY) {
+  float m       = KEYS[ki].hy;
+  float plateau = KEYS[ki].hx - m;
+  float dx = offX < 0 ? -offX : offX;
+  float dy = offY < 0 ? -offY : offY;
+  float ax = (dx > plateau) ? (dx - plateau) / m : 0.0f;
+  float ay = dy / m;
+  return ax > ay ? ax : ay;
+}
+
+// 갭(keyAt() == -1)에서 "제일 가까운 키"와 그 중심으로부터의 부호 있는 오프셋(mm).
+// keyAt() 은 갭에서 offX/offY 를 0으로 돌려준다 — 기준 키가 없으니 당연하지만,
+// 그러면 "어느 틈을 눌렀나"가 로그에서 통째로 사라진다. 미인식 타건(#miss)은
+// 바로 그 틈이 궁금한 기록이라, 여기서 기준 키를 하나 정해 좌표를 붙여준다.
+//
+// 거리는 중심까지가 아니라 "키캡 밖으로 삐져나온 몫"으로 잰다. 키캡 크기가
+// 제각각이라 중심 거리로 재면 SPACE 처럼 큰 키가 늘 이긴다 — Q 와 W 사이를
+// 눌러도 SPACE 가 제일 가깝다고 나오면 아무 쓸모가 없다.
+inline int nearestKey(float sx, float sy, float* offX, float* offY) {
+  float lx = sx - CAL_OX;
+  float ly = sy - CAL_OY;
+  int   best = -1;
+  float bestD = 0.0f;
+  *offX = 0.0f; *offY = 0.0f;
+  for (int i = 0; i < N_KEYS; i++) {
+    float sx0 = lx - KEYS[i].cx;
+    float sy0 = ly - KEYS[i].cy;
+    float ox  = (sx0 < 0 ? -sx0 : sx0) - KEYS[i].hx;   // 키캡 밖으로 나간 가로 거리
+    float oy  = (sy0 < 0 ? -sy0 : sy0) - KEYS[i].hy;   // 〃 세로
+    if (ox < 0.0f) ox = 0.0f;
+    if (oy < 0.0f) oy = 0.0f;
+    float d = sqrtf(ox * ox + oy * oy);
+    if (best < 0 || d < bestD) { best = i; bestD = d; *offX = sx0; *offY = sy0; }
+  }
+  return best;
 }
 
 // 접촉이 어느 손 담당인지. ki는 keyAt()이 돌려준 키 인덱스, sx는 sensel x(mm).
