@@ -8,7 +8,7 @@
 //    mode 1 = position : 클릭 진폭에만.  임계힘은 어디서나 F_PEAK.
 //    mode 2 = force    : 임계힘에만.     클릭 세기는 어디서나 동일.
 //    mode 3 = beta     : 클릭은 mode 0과 똑같이 두고(어디서나 같은 힘, 같은 세기)
-//                        그 위에 진동을 얹어서 편심을 알린다.
+//                        키 위의 편심은 진동, 틈은 토글에 따라 진동/위쪽 bump.
 //
 //  그래서 진폭 축(ampGain)과 힘 축(forceScale)을 각각 켜고 끌 수 있게 만들면
 //  한 펌웨어가 세 조건을 전부 낸다. mode를 바꾸면 그 자리에서 조건이 바뀌므로
@@ -17,7 +17,7 @@
 //  ── mode 3 (beta) ────────────────────────────────────────────────────────────
 //  mode 1과 2의 실패를 같은 방식으로 피한다: 에러 신호를 성공 신호와 다른 채널에
 //  싣는다. 임계힘도 클릭 세기도 mode 0과 동일해서 키는 어디를 눌러도 똑같이,
-//  반드시 눌린다. 위치는 오직 진동 세기로만 나간다.
+//  반드시 눌린다. 키캡 위치는 진동 세기로, 틈은 gapBump로 방식을 고른다.
 //
 //    vibWhen 0 = 누를 때   버클링 순간 + vibDelay 뒤에 vibDur 길이의 버스트
 //            1 = 뗄 때     힘이 fValley 아래로 떨어져 풀리는 순간에 같은 버스트
@@ -50,8 +50,12 @@
 //    그 계단이 "여기서부터 빗나갔다"는 문턱으로 손끝에 잡히는 게 목적이다.
 //    deadband 가 0(기본값)이면 조용한 구역이 없어 계단도 없다.
 //
-//  현재 KEYS[]에 등록된 키캡 사이 틈은 vibGap/vibGapFreq로 울린다.
-//  미매핑 키 자리와 키보드 외곽은 상시(vibWhen 3)에서도 무음이다.
+//  gapBump=0은 틈에 기존 vibGap/vibGapFreq 진동을 낸다(vibWhen=3).
+//  gapBump=1은 틈 진동을 끄고, gapBumpMode=0은 위쪽 bump 한 번,
+//  gapBumpMode=1은 누른 힘에 비례해 누르는 동안 계속 위쪽으로 변위시킨다.
+//  gapBumpForce를 넘는 순간 gapBumpDur 동안 음의 반사인 파형 한 번을
+//  보태서, 양의 방향인 보통 클릭과 반대로 바가 위로 움직인다.
+//  미매핑 키 자리와 키보드 외곽은 무음이다.
 //
 //  ★ vibDelay 가 기본 50ms인 이유: 버클링 스텝은 광대역 트랜지언트라 그 직후
 //    20~50ms는 순방향 마스킹으로 진동이 묻힌다. 0으로 두면 클릭에 먹혀서
@@ -133,6 +137,9 @@ SenselFrame frame;
 void initializeSensel(){
   myusb.begin();
   senselOpen();
+  // Ellipse(0x01)는 제어에서 쓰지 않아 끄고, 같은 6바이트 크기의
+  // Peak(0x08)를 요청한다. contact 패킷은 기존과 같은 16바이트다.
+  senselSetContactsMask(SENSEL_CONTACTS_MASK_PEAK);
   senselSetFrameContent(SENSEL_REG_CONTACTS_FLAG);
   senselStartScanning();
 }
@@ -196,7 +203,16 @@ void initializeBars(){
 //   gainMin/ampCurve   : 키캡 경계에서의 클릭 세기와 감쇠 지수 (진폭 축).
 //   calOX/calOY        : keymap.h의 센서 원점 보정. 오버레이가 밀렸을 때 쓴다.
 // 구조체 정의는 params.h에 있다 (Arduino 자동 프로토타입 때문에 헤더여야 한다).
-#define P_MAGIC 0x56434D3CUL   // VCM12 — 구조/저장 의미가 바뀌면 이 값을 올릴 것
+#define P_MAGIC 0x56434D44UL   // VCM20 — 구조/저장 의미가 바뀌면 이 값을 올릴 것
+                               //  (VCM19 -> 20: peakAreaMax 추가)
+                               //  (VCM18 -> 19: peakEnable/Threshold/MinTotal 추가)
+                               //  (VCM17 -> 18: vibSpeedFloor/vibPressFull 추가)
+                               //  (VCM16 -> 17: vibSpeedMode/Min/Max 추가)
+                               //  (VCM15 -> 16: gapBumpMode + 힘 비례 위쪽 변위)
+                               //  (VCM14 -> 15: gap bump를 버클링 힘이 아닌 첫 접촉에 발사)
+                               //  (VCM13 -> 14: Params 끝에 gapBump 토글 추가)
+                               //  (VCM12 -> 13: 틈 진동을 위쪽 gap bump로 바꾸고
+                               //   Params 끝에 gapBump* 추가)
                                //  (VCM11 -> 12: Params 끝에 vibMove 추가)
                                //  (VCM10 -> 11: 상시 모드의 vibDur를 정지 타이머로 사용)
                                //  (VCM9 = vibGap 이 없던 판. Params에 필드가 늘었다)
@@ -238,6 +254,21 @@ void applyDefaults(int mode) {
   P.missMin    = 30.0f;
   P.telHz      = 30;
   P.vibMove    = 5.0f;   // 기존 고정값. HTML에서 0.5~1mm로 낮춰 슬라이딩 반응 튜닝
+  P.gapBumpAmp   = 400.0f;
+  P.gapBumpForce = 1.0f;  // 틈 접촉이 잡히는 첫 프레임에 즉시 발사
+  P.gapBumpDur   = 35;
+  P.gapBump      = 1;
+  P.gapBumpMode  = 0;
+  P.gapDisplaceForce = 300.0f;
+  P.vibSpeedMode = 0;
+  P.vibSpeedMin  = 20.0f;
+  P.vibSpeedMax  = 500.0f;
+  P.vibSpeedFloor = 100.0f; // 정지 시 위치 진폭의 10%를 미세 진동으로 유지
+  P.vibPressFull  = 20.0f;  // 약한 타건도 한 프레임 힘 변화 20에서 최대 배율
+  P.peakEnable    = 1;
+  P.peakThreshold = 7.0f;   // 실측 가벼운 손톱 타건은 약 7.5~16gf
+  P.peakMinTotal  = 20.0f;  // 접촉 발생 수준 아래의 단일 셀 스파이크 차단
+  P.peakAreaMax   = 115.0f; // 손톱 50~107, 피부 118~159 실측의 중간 게이트
 }
 
 // mode 0(equal)은 두 축 모두 꺼진 상태다 — forceScale()과 ampGain()이 나란히
@@ -268,6 +299,10 @@ static const Tunable TUNABLES[] = {
   {"fPeak",       &P.fPeak,       nullptr,  1,  2000},
   {"fValley",     &P.fValley,     nullptr,  0,  2000},
   {"fEnd",        &P.fEnd,        nullptr,  1,  2000},
+  {"peakEnable",  nullptr, &P.peakEnable,   0,     1},
+  {"peakThreshold", &P.peakThreshold, nullptr, 1, 1000},
+  {"peakMinTotal", &P.peakMinTotal, nullptr, 0, 2000},
+  {"peakAreaMax",  &P.peakAreaMax,  nullptr, 0, 2000},
   {"zPeak",       &P.zPeak,       nullptr,  0,     1},
   {"zValley",     &P.zValley,     nullptr,  0,     1},
   {"zEnd",        &P.zEnd,        nullptr,  0,     1},
@@ -278,6 +313,8 @@ static const Tunable TUNABLES[] = {
   {"gainMin",     &P.gainMin,     nullptr,  0,     1},
   {"ampCurve",    &P.ampCurve,    nullptr, 0.01f, 100},
   {"vibWhen",     nullptr, &P.vibWhen,      0,     3},
+  {"gapBump",     nullptr, &P.gapBump,      0,     1},
+  {"gapBumpMode", nullptr, &P.gapBumpMode,  0,     1},
   {"vibCenter",   &P.vibCenter,   nullptr,  0,  1000},
   {"vibEdge",     &P.vibEdge,     nullptr,  0,  1000},
   {"vibGap",      &P.vibGap,      nullptr,  0,  1000},
@@ -287,6 +324,15 @@ static const Tunable TUNABLES[] = {
   {"vibDur",      nullptr, &P.vibDur,       5, 10000},
   {"vibMove",     &P.vibMove,     nullptr, 0.1f,    20},
   {"vibDelay",    nullptr, &P.vibDelay,     0,   300},
+  {"vibSpeedMode",nullptr, &P.vibSpeedMode, 0,     1},
+  {"vibSpeedMin", &P.vibSpeedMin, nullptr,  0,  2000},
+  {"vibSpeedMax", &P.vibSpeedMax, nullptr,  1,  5000},
+  {"vibSpeedFloor", &P.vibSpeedFloor, nullptr, 0, 1000},
+  {"vibPressFull", &P.vibPressFull, nullptr, 1, 2000},
+  {"gapBumpAmp",  &P.gapBumpAmp,  nullptr,  0,  1000},
+  {"gapBumpForce",&P.gapBumpForce,nullptr,  1,  2000},
+  {"gapBumpDur",  nullptr, &P.gapBumpDur,    5,   300},
+  {"gapDisplaceForce", &P.gapDisplaceForce, nullptr, 1, 2000},
   {"calOX",       &P.calOX,       nullptr, -60,   60},
   {"calOY",       &P.calOY,       nullptr, -60,   60},
   {"loopPeriod",  nullptr, &P.loopPeriod,   1,    50},
@@ -300,10 +346,10 @@ static const Tunable TUNABLES[] = {
 };
 static const int N_TUNABLES = sizeof(TUNABLES)/sizeof(TUNABLES[0]);
 
-SideState sideL = {{{0, 0.0f, -1, -1, 0.0f, false, 0.0f, 0.0f, 0.0f},
-                    {0, 0.0f, -1, -1, 0.0f, false, 0.0f, 0.0f, 0.0f}}, 0.0f, 0.0f};
-SideState sideR = {{{0, 0.0f, -1, -1, 0.0f, false, 0.0f, 0.0f, 0.0f},
-                    {0, 0.0f, -1, -1, 0.0f, false, 0.0f, 0.0f, 0.0f}}, 0.0f, 0.0f};
+// setup()에서 슬롯별 런타임 값을 명시적으로 초기화한다. 구조체에 상태를
+// 추가해도 위치 기반 초기화 목록이 어긋나지 않도록 전역은 영 초기화만 한다.
+SideState sideL = {};
+SideState sideR = {};
 
 int           frameDrops = 0;
 unsigned long dropTotal  = 0;
@@ -314,7 +360,16 @@ float ctEdge[SENSEL_MAX_CONTACTS];   // 키 중심에서의 정규화 거리 (0 
 float ctDx[SENSEL_MAX_CONTACTS];     // 키 중심에서의 부호 있는 가로 오프셋(mm). +오른쪽
 float ctDy[SENSEL_MAX_CONTACTS];     // 키 중심에서의 부호 있는 세로 오프셋(mm). +아래
 bool  ctLeft[SENSEL_MAX_CONTACTS];   // true: 왼쪽 바 담당
+float ctSpeed[SENSEL_MAX_CONTACTS];  // 접촉의 평면 이동 속도(mm/s)
+float ctForceDelta[SENSEL_MAX_CONTACTS]; // 직전 프레임과의 힘 변화량(누름/떨 속도 대리값)
 int   nContacts = 0;
+
+int   speedPrevId[SENSEL_MAX_CONTACTS];
+float speedPrevX[SENSEL_MAX_CONTACTS];
+float speedPrevY[SENSEL_MAX_CONTACTS];
+float speedPrevForce[SENSEL_MAX_CONTACTS];
+int   speedPrevCount = 0;
+unsigned long speedPrevUs = 0;
 
 // ── 상시 진동 정지 감지 ──────────────────────────────────────────────────────
 // 모든 접촉 ID의 기준 위치를 기억한다. 어느 하나라도 기준점에서 vibMove 이상
@@ -343,6 +398,59 @@ void classifyContacts() {
     ctGap[i]  = (ctKey[i] < 0) && activeKeyGapAt(x, frame.contacts[i].y_pos);
     ctLeft[i] = keyIsLeft(ctKey[i], x);
   }
+}
+
+// 접촉 ID별 이전 성공 프레임과의 평면 이동거리를 시간으로 나눈다.
+// 새 접촉은 비교할 좌표가 없으므로 0mm/s에서 시작한다. 프레임 드롭은
+// 이 함수를 호출하지 않아, 다음 성공 프레임에서 실제 경과시간으로 계산된다.
+void updateContactSpeeds() {
+  unsigned long nowUs = micros();
+  float dt = speedPrevUs ? (float)(nowUs - speedPrevUs) * 1.0e-6f : 0.0f;
+  int nextId[SENSEL_MAX_CONTACTS];
+  float nextX[SENSEL_MAX_CONTACTS], nextY[SENSEL_MAX_CONTACTS], nextForce[SENSEL_MAX_CONTACTS];
+  int nextCount = 0;
+
+  for (int i = 0; i < nContacts; i++) {
+    ctSpeed[i] = 0.0f;
+    ctForceDelta[i] = 0.0f;
+    byte t = frame.contacts[i].type;
+    if (t == SENSEL_CONTACT_TYPE_INVALID || t == SENSEL_CONTACT_TYPE_END) continue;
+
+    int id = (int)frame.contacts[i].id;
+    float x = frame.contacts[i].x_pos;
+    float y = frame.contacts[i].y_pos;
+    float force = frame.contacts[i].total_force;
+    // START 프레임에는 이전 접촉이 없으므로 힘 0에서 시작한 것으로 본다.
+    // 그래야 첫 프레임에 임계를 넘는 빠른 타건도 속도 0으로 사라지지 않는다.
+    ctForceDelta[i] = force;
+    if (dt > 0.0f) {
+      for (int j = 0; j < speedPrevCount; j++) {
+        if (speedPrevId[j] != id) continue;
+        float dx = x - speedPrevX[j];
+        float dy = y - speedPrevY[j];
+        ctSpeed[i] = sqrtf(dx * dx + dy * dy) / dt;
+        ctForceDelta[i] = fabsf(force - speedPrevForce[j]);
+        break;
+      }
+    }
+
+    if (nextCount < SENSEL_MAX_CONTACTS) {
+      nextId[nextCount] = id;
+      nextX[nextCount] = x;
+      nextY[nextCount] = y;
+      nextForce[nextCount] = force;
+      nextCount++;
+    }
+  }
+
+  speedPrevCount = nextCount;
+  for (int i = 0; i < nextCount; i++) {
+    speedPrevId[i] = nextId[i];
+    speedPrevX[i] = nextX[i];
+    speedPrevY[i] = nextY[i];
+    speedPrevForce[i] = nextForce[i];
+  }
+  speedPrevUs = nowUs;
 }
 
 // 상시 진동은 손가락이 움직이는 동안 위치 탐색 피드백을 주고, 모든 손가락이
@@ -454,6 +562,34 @@ float forceScale(float edge) {
   // return 1.0f + (P.fEdgeScale - 1.0f) * (powf(edge, P.fEdgeCurve));
 }
 
+// Peak 경로도 total 경로와 같은 위치 정책을 따른다. mode 2의
+// 가장자리에서 total 임계가 높아지면 peak 임계도 같은 배수로 높아진다.
+float peakThresholdAt(float edge) {
+  return P.peakThreshold * forceScale(edge);
+}
+
+// peak_force는 접촉 영역 안의 단일 sensel 최댓값이고 total_force는
+// 그 영역의 합이므로, 정상 패킷이라면 peak이 total을 넘을 수 없다.
+// 마스크/패킷 형식이 잘못되어 다른 6바이트를 peak로 읽는 경우에도
+// 이 검사가 조기 버클링으로 이어지지 않게 막는다. 2gf는 양자화 오차 여유다.
+bool peakSampleValid(float totalForce, float peakForce) {
+  return peakForce >= 0.0f && peakForce <= 1000.0f && peakForce <= totalForce + 2.0f;
+}
+
+// 레스팅 손가락이 total_force 순위로 슬롯을 독점하지 않게, Peak 경로로
+// 임계에 가까운 집중 접촉(손톱)도 슬롯 경쟁에 반영한다. 단위는 total
+// 경로의 중심 임계에 맞춘 등가 힘이다.
+float contactStrength(float totalForce, float peakForce, float area) {
+  float strength = totalForce;
+  bool areaOK = P.peakAreaMax <= 0.0f || (area > 0.0f && area <= P.peakAreaMax);
+  if (P.peakEnable && areaOK && peakSampleValid(totalForce, peakForce) &&
+      totalForce >= P.peakMinTotal && P.peakThreshold > 0.0f) {
+    float peakEquivalent = peakForce * P.fPeak / P.peakThreshold;
+    if (peakEquivalent > strength) strength = peakEquivalent;
+  }
+  return strength;
+}
+
 // 유효 거리 -> 클릭 진폭 배수. 진폭 축이 꺼진 모드(force)에서는 항상 1.0이다.
 float ampGain(float edge) {
   if (!useAmpAxis() || edge <= 0.0f) return 1.0f;
@@ -492,6 +628,33 @@ float vibAmpFor(float edge) {
   return v * 0.001f;
 }
 
+// 이동 속도 토글이 꺼져 있으면 위치 세기를 그대로 통과시킨다.
+// 켜져 있으면 MIN~MAX mm/s를 0~1로 선형 정규화한다.
+float vibSpeedMultiplier(float speed, float forceDelta) {
+  if (!P.vibSpeedMode) return 1.0f;
+  float planar;
+  if (P.vibSpeedMax <= P.vibSpeedMin)
+    planar = speed >= P.vibSpeedMax ? 1.0f : 0.0f;
+  else
+    planar = (speed - P.vibSpeedMin) / (P.vibSpeedMax - P.vibSpeedMin);
+  if (planar < 0.0f) planar = 0.0f;
+  if (planar > 1.0f) planar = 1.0f;
+
+  // Sensel에는 z 좌표가 없어 빠른 내려치기/떼기는 x/y 속도로 보이지 않는다.
+  // 한 프레임의 힘 변화가 vibPressFull이면 배율 1인 누름/뗌 속도
+  // 대리값으로 본다. 평면 이동과 더하지 않고 더 큰 쪽만 쓴다.
+  float press = forceDelta / fmaxf(P.vibPressFull, 1.0f);
+  if (press > 1.0f) press = 1.0f;
+  float motion = fmaxf(planar, press);
+
+  // 정지해도 위치 단서가 완전히 사라지지 않게 최소 배율을 남겨둔다.
+  // floor=100이면 정지 시 10%, 최대 속도에서 100%가 된다.
+  float floor = P.vibSpeedFloor * 0.001f;
+  if (floor < 0.0f) floor = 0.0f;
+  if (floor > 1.0f) floor = 1.0f;
+  return floor + (1.0f - floor) * motion;
+}
+
 // force -> 단위 버클 곡선값. 좌굴 상태는 접촉(슬롯)마다 따로 갱신된다.
 //   edge : 버클링 전에는 매 프레임 반영되고, 버클링하는 순간 c->heldEdge에
 //          래치돼 릴리즈까지 그걸 쓴다. 누른 채 미끄러져도 임계와 세기가
@@ -500,7 +663,8 @@ float vibAmpFor(float edge) {
 //          않는다. 갭에서 버클링하면 heldKey가 -1로 래치돼 키는 안 나가는데
 //          바만 물려 있고, 손가락이 키캡 안으로 흔들려 들어오는 순간 램프 없이
 //          z가 통째로 튀어나온다.
-float forceToZ(ContactState* c, float force, float edge, bool onKey) {
+float forceToZ(ContactState* c, float force, float peakForce,
+               float peakProgress, float edge, bool onKey) {
   float e  = (c->buttonState == 0) ? edge : c->heldEdge;
   float fs = forceScale(e);
   float zp = P.zPeak, zv = P.zValley, ze = P.zEnd;   // 변위는 위치와 무관하다
@@ -511,18 +675,47 @@ float forceToZ(ContactState* c, float force, float edge, bool onKey) {
 
     // ── 장전/해제 (자세한 이유는 barstate.h의 armed 주석) ──────────────────
     // 같은 이유다. 하나만 쓰면 경계에서 손끝이 떨 때 장전이 껌뻑인다.
-    if (force < fPeak || !onKey) {
-      z = force / fPeak * zp;
+    // Peak가 total보다 먼저 임계에 닿을 때도 프리로드를 같은 비율로 올린다.
+    // 그렇지 않으면 낮은 total_force에서 zEnd로 한번에 점프해 손톱
+    // 타건의 클릭이 피부 타건보다 과도하게 세진다.
+    float preload = force / fPeak;
+    if (peakProgress > preload) preload = peakProgress;
+    bool downHit = preload >= 1.0f;
+    if (!downHit || !onKey) {
+      z = preload * zp;
       if (z > zp) z = zp;      // 갭에서 임계를 넘겨도 버클링 직전까지만
     }
     else {
       c->buttonState = 1;
       c->heldEdge    = edge;   // 이 뻣뻣함/세기로 뗄 때까지 간다
       c->maxForce    = force;  // 여기서부터 릴리즈까지의 최대값을 쌓는다
+      c->heldByPeak = force < fPeak; // total 문턱 아래의 peak 조기 트리거
       z = ze;
     }
   }
   else {                       // after buckling
+    // Peak로 조기 키다운된 접촉은 total_force가 fValley보다 낮은 채로
+    // 시작할 수 있다. 이때 total 릴리즈를 쓰면 바로 키업된 뒤 다음
+    // 프레임에 다시 눌려 연타와 강한 바 진동이 생긴다. total 곡선의
+    // Peak/End/Valley 비율을 peak_force 축에 옮겨 독립 히스테리시스를 쓴다.
+    if (c->heldByPeak) {
+      float heldPeak = peakThresholdAt(c->heldEdge);
+      float basePeak = fmaxf(P.fPeak, 1.0f);
+      float pValley  = heldPeak * P.fValley / basePeak;
+      float pEnd     = heldPeak * P.fEnd    / basePeak;
+      float den      = pEnd - pValley;
+      if (den < 1e-3f) den = 1e-3f;
+      if (peakForce > pValley) {
+        z = (peakForce - pEnd) * (ze - zv) / den + ze;
+        if (z > ze) z = ze;
+      } else {
+        c->buttonState = 0;
+        c->heldByPeak  = false;
+        z = force / (P.fPeak * forceScale(edge)) * P.zPeak;
+      }
+      return z;
+    }
+
     float fValley = P.fValley * fs;
     float fEnd    = P.fEnd * fs;
     float den     = fEnd - fValley;
@@ -533,6 +726,7 @@ float forceToZ(ContactState* c, float force, float edge, bool onKey) {
     }
     else {
       c->buttonState = 0;
+      c->heldByPeak  = false;
       // 풀린 뒤엔 다시 현재 위치 기준
       z = force / (P.fPeak * forceScale(edge)) * P.zPeak;
     }
@@ -546,10 +740,17 @@ float forceToZ(ContactState* c, float force, float edge, bool onKey) {
 // 내려간 경우 / 접촉이 통째로 사라진 경우)이라 양쪽에서 부른다.
 void probeRelease(ContactState* c) {
   if (!P.probe || c->heldKey < 0) return;
+  float th = P.fPeak * forceScale(c->heldEdge);
+  float pth = peakThresholdAt(c->heldEdge);
   Serial.print("#rel key=");
   Serial.print(KEYS[c->heldKey].label);
   Serial.print(" fmax="); Serial.print(c->maxForce, 0);
-  Serial.print(" th=");   Serial.println(P.fPeak * forceScale(c->heldEdge), 0);
+  Serial.print(" pfmax="); Serial.print(c->maxPeak, 0);
+  Serial.print(" th=");   Serial.print(th, 0);
+  Serial.print(" pth=");  Serial.print(pth, 0);
+  Serial.print(" x=");    Serial.print(th > 0.0f ? c->maxForce / th : 0.0f, 2);
+  Serial.print(" pr=");   Serial.print(pth > 0.0f ? c->maxPeak / pth : 0.0f, 2);
+  Serial.print(" conc="); Serial.println(c->maxForce > 0.0f ? c->maxPeak / c->maxForce : 0.0f, 2);
 }
 
 // 버클링에 못 닿고 끝난 누름 하나. #probe 도 #rel 도 안 나오는 사건이라, 이 줄이
@@ -568,6 +769,7 @@ void probeRelease(ContactState* c) {
 void probeMiss(ContactState* c) {
   if (!P.probe || P.missMin <= 0.0f || c->missMax < P.missMin) return;
   float th = P.fPeak * forceScale(edgeNorm(c->missEdge));
+  float pth = peakThresholdAt(edgeNorm(c->missEdge));
   Serial.print("#miss key=");
   Serial.print(c->missKey >= 0 ? KEYS[c->missKey].label : "-");
   Serial.print(" why=");  Serial.print(c->missOn ? "weak" : "gap");
@@ -580,12 +782,18 @@ void probeMiss(ContactState* c) {
   Serial.print(" th=");   Serial.print(th, 0);
   Serial.print(" f=");    Serial.print(c->missMax, 0);
   Serial.print(" af=");   Serial.print(c->missAct, 0);
-  Serial.print(" x=");    Serial.println(th > 0.0f ? c->missAct / th : 0.0f, 2);
+  Serial.print(" x=");    Serial.print(th > 0.0f ? c->missAct / th : 0.0f, 2);
+  Serial.print(" pf=");   Serial.print(c->missPeakMax, 0);
+  Serial.print(" pth=");  Serial.print(pth, 0);
+  Serial.print(" pr=");   Serial.print(pth > 0.0f ? c->missPeakMax / pth : 0.0f, 2);
+  Serial.print(" conc="); Serial.print(c->missMax > 0.0f ? c->missPeakMax / c->missMax : 0.0f, 2);
+  Serial.print(" area="); Serial.print(c->missArea, 0);
+  Serial.print(" dens="); Serial.println(c->missArea > 0.0f ? c->missMax / c->missArea : 0.0f, 3);
 }
 
 // 에피소드를 접고 비운다. 다음 누름을 받을 준비까지 여기서 끝낸다.
 void missClear(ContactState* c) {
-  c->missMax = 0.0f; c->missAct = 0.0f;
+  c->missMax = 0.0f; c->missAct = 0.0f; c->missPeakMax = 0.0f; c->missArea = 0.0f;
   c->missEdge = 0.0f; c->missDx = 0.0f; c->missDy = 0.0f;
   c->missPx = 0.0f;  c->missPy = 0.0f;   c->missKey = -1;  c->missOn = false;
 }
@@ -617,9 +825,13 @@ void assignSlots(SideState* s, bool leftSide, int outIdx[SIDE_SLOTS]) {
                                          // 아래 sideDrive() 의 "힘이 빠졌다" 경로가
                                          // 영영 안 걸리므로 여기서도 닫아야 한다.
       s->c[k].activeId = -1; s->c[k].buttonState = 0; s->c[k].prevForce = 0.0f;
-      s->c[k].heldKey = -1;  s->c[k].heldEdge = 0.0f;  s->c[k].maxForce = 0.0f;
+      s->c[k].heldByPeak = false;
+      s->c[k].heldKey = -1;  s->c[k].heldEdge = 0.0f;
+      s->c[k].maxForce = 0.0f; s->c[k].maxPeak = 0.0f;
       missClear(&s->c[k]);   s->c[k].missArmed = true;
-      s->c[k].wasOnKey = false; s->c[k].entryForce = 0.0f;
+      s->c[k].wasOnKey = false;
+      s->c[k].entryForce = 0.0f; s->c[k].entryPeak = 0.0f;
+      s->c[k].gapBumpArmed = true;
     }
   }
 
@@ -642,7 +854,9 @@ void assignSlots(SideState* s, bool leftSide, int outIdx[SIDE_SLOTS]) {
         if (outIdx[j] == i || candidates[j] == i) { taken = true; break; }
       }
       if (taken) continue;
-      float f = frame.contacts[i].total_force;
+      float f = contactStrength(frame.contacts[i].total_force,
+                                frame.contacts[i].peak_force,
+                                frame.contacts[i].area);
       if (best < 0 || f > bestF) { best = i; bestF = f; }
     }
     if (best < 0) break;
@@ -676,13 +890,17 @@ void assignSlots(SideState* s, bool leftSide, int outIdx[SIDE_SLOTS]) {
       if (s->c[k].activeId != newId) {
         s->c[k].activeId = newId;
         s->c[k].buttonState = 0; s->c[k].prevForce = 0.0f;
-        s->c[k].heldKey = -1; s->c[k].heldEdge = 0.0f; s->c[k].maxForce = 0.0f;
+        s->c[k].heldByPeak = false;
+        s->c[k].heldKey = -1; s->c[k].heldEdge = 0.0f;
+        s->c[k].maxForce = 0.0f; s->c[k].maxPeak = 0.0f;
         missClear(&s->c[k]); s->c[k].missArmed = true;   // 새 손가락 = 새 에피소드
+        s->c[k].gapBumpArmed = true;
         // 레스팅 손가락을 밀어내고 뒤늦게 선택된 타건은 현재 힘을
         // 그대로 보아야 한다. 여기서 entryForce로 빼면 슬롯을 받은 시점의
         // 누름이 전부 사라져 또 더 눌러야만 버클링한다.
         s->c[k].wasOnKey = (ctKey[best] >= 0);
         s->c[k].entryForce = 0.0f;
+        s->c[k].entryPeak  = 0.0f;
       }
     }
   }
@@ -692,13 +910,17 @@ void assignSlots(SideState* s, bool leftSide, int outIdx[SIDE_SLOTS]) {
 float sideDrive(SideState* s, const int idx[SIDE_SLOTS], SlotInfo out[SIDE_SLOTS]) {
   float z = 0.0f;
   for (int k = 0; k < SIDE_SLOTS; k++) {
-    float force = 0.0f, edgeRaw = 0.0f;
+    float force = 0.0f, peakForce = 0.0f, area = 0.0f, edgeRaw = 0.0f;
     float dxRaw = 0.0f, dyRaw = 0.0f;   // #probe 에만 실린다. 햅틱은 안 쓴다
     float pxRaw = 0.0f, pyRaw = 0.0f;   // 센서 원좌표(mm). #miss 에만 실린다
     int   key   = -1;
     bool  inGap = false;
+    float speed = 0.0f;
+    float forceDelta = 0.0f;
     if (idx[k] >= 0) {
       force   = frame.contacts[idx[k]].total_force;
+      peakForce = frame.contacts[idx[k]].peak_force;
+      area    = frame.contacts[idx[k]].area;
       key     = ctKey[idx[k]];
       edgeRaw = ctEdge[idx[k]];
       dxRaw   = ctDx[idx[k]];
@@ -706,6 +928,8 @@ float sideDrive(SideState* s, const int idx[SIDE_SLOTS], SlotInfo out[SIDE_SLOTS
       pxRaw   = frame.contacts[idx[k]].x_pos;
       pyRaw   = frame.contacts[idx[k]].y_pos;
       inGap   = ctGap[idx[k]];
+      speed   = ctSpeed[idx[k]];
+      forceDelta = ctForceDelta[idx[k]];
     }
 
     // 데드밴드를 뺀 값이 아래 전부(임계 배수, 진폭, 프리로드, 래치)의 기준이 된다.
@@ -720,27 +944,44 @@ float sideDrive(SideState* s, const int idx[SIDE_SLOTS], SlotInfo out[SIDE_SLOTS
     if (!s->c[k].buttonState) {
       if (onKey && !s->c[k].wasOnKey) {
         s->c[k].entryForce = force;
+        s->c[k].entryPeak  = peakForce;
       } else if (onKey && s->c[k].entryForce > 0.0f && force < s->c[k].entryForce) {
         s->c[k].entryForce = force;
       }
+      if (onKey && s->c[k].entryPeak > 0.0f && peakForce < s->c[k].entryPeak)
+        s->c[k].entryPeak = peakForce;
     }
     float actForce = force;
+    float actPeak  = peakForce;
     // 버클링 후 갭으로 미끄러져도 릴리즈까지 같은 기준점을 유지한다.
     if (s->c[k].entryForce > 0.0f) {
       actForce -= s->c[k].entryForce;
       if (actForce < 0.0f) actForce = 0.0f;
     }
+    if (s->c[k].entryPeak > 0.0f) {
+      actPeak -= s->c[k].entryPeak;
+      if (actPeak < 0.0f) actPeak = 0.0f;
+    }
     s->c[k].wasOnKey = onKey;
+
+    float peakTh = peakThresholdAt(edge);
+    bool areaOK = P.peakAreaMax <= 0.0f || (area > 0.0f && area <= P.peakAreaMax);
+    bool peakEligible = P.peakEnable && areaOK && peakSampleValid(force, peakForce) &&
+                        actForce >= P.peakMinTotal && peakTh > 0.0f;
+    float peakProgress = peakEligible ? actPeak / peakTh : 0.0f;
+    bool peakHit = peakProgress >= 1.0f;
 
     int prevBS = s->c[k].buttonState;
     // 누르고 있는 동안 최대힘을 쌓는다. forceToZ()가 상태를 바꾸기 전에 봐야
     // 릴리즈 직전 프레임의 힘까지 들어간다.
     if (prevBS && force > s->c[k].maxForce) s->c[k].maxForce = force;
+    if (prevBS && peakForce > s->c[k].maxPeak) s->c[k].maxPeak = peakForce;
     // 접촉이 없어도(force=0) 호출해서 버클링 상태를 풀어줘야 한다.
-    float unit = forceToZ(&s->c[k], actForce, edge, onKey);
+    float unit = forceToZ(&s->c[k], actForce, actPeak, peakProgress, edge, onKey);
     if (prevBS && !s->c[k].buttonState) {   // 힘이 빠져 풀린 경우
       probeRelease(&s->c[k]);               // heldKey는 아래에서 비워지므로 지금 찍는다
       s->c[k].maxForce = 0.0f;
+      s->c[k].maxPeak = 0.0f;
     }
 
     // ── 미인식 타건 에피소드 ────────────────────────────────────────────────
@@ -764,6 +1005,7 @@ float sideDrive(SideState* s, const int idx[SIDE_SLOTS], SlotInfo out[SIDE_SLOTS
       } else if (force > s->c[k].missMax) {
         s->c[k].missMax  = force;
         s->c[k].missAct  = actForce;
+        s->c[k].missArea = area;
         s->c[k].missOn   = onKey;
         s->c[k].missKey  = key;
         s->c[k].missEdge = edgeRaw;
@@ -780,7 +1022,11 @@ float sideDrive(SideState* s, const int idx[SIDE_SLOTS], SlotInfo out[SIDE_SLOTS
             s->c[k].missEdge = keyEdgeOf(nk, ndx, ndy);
           }
         }
-      } else if (s->c[k].missMax > 0.0f && force < missClose) {
+      }
+      // total_force와 peak_force의 최대 시점은 다를 수 있으므로 따로 쌓는다.
+      if (s->c[k].missArmed && peakForce > s->c[k].missPeakMax)
+        s->c[k].missPeakMax = peakForce;
+      if (s->c[k].missMax > 0.0f && force < missClose) {
         probeMiss(&s->c[k]);        // 힘이 빠졌다 = 이 누름은 끝났다
         missClear(&s->c[k]);
       }
@@ -795,7 +1041,34 @@ float sideDrive(SideState* s, const int idx[SIDE_SLOTS], SlotInfo out[SIDE_SLOTS
     bool up   = ( prevBS && !s->c[k].buttonState);   // 키업
     // forceToZ()는 유효 힘을 받으므로 버클링 첫 프레임의 maxForce는
     // 여기서 센서 원시 힘으로 다시 잡는다. #rel fmax의 기존 의미를 유지한다.
-    if (down) s->c[k].maxForce = force;
+    if (down) {
+      s->c[k].maxForce = force;
+      s->c[k].maxPeak  = peakForce;
+    }
+
+    // ── 키 틈의 위쪽 bump ───────────────────────────────────────────────────
+    // gapBumpForce를 위로 넘을 때 한 번만 발사하고, 반 문턱 아래로
+    // 힘을 빼거나 틈을 벗어나야 다시 장전한다. 틈을 가로지르며 누르는
+    // 경우에도 각 틈에 진입할 때 새 bump를 느낄 수 있다. 이미 키가
+    // 버클링된 채 틈으로 미끄러진 경우는 두 파형이 섞이지 않게 bump를 막는다.
+    if (!useVibAxis() || !P.gapBump || P.gapBumpMode != 0 || s->c[k].buttonState) {
+      s->c[k].gapBumpArmed = true;
+    } else if (!inGap || force <= P.gapBumpForce * 0.5f) {
+      s->c[k].gapBumpArmed = true;
+    } else if (s->c[k].gapBumpArmed && force >= P.gapBumpForce) {
+      unsigned long nowUs = micros();
+      noInterrupts();
+      s->c[k].gapBumpT0  = nowUs ? nowUs : 1;
+      s->c[k].gapBumpAmp = P.gapBumpAmp * 0.001f;
+      interrupts();
+      s->c[k].gapBumpArmed = false;
+    }
+
+    // mode 3의 틈에서는 힘에 따라 아래로 쌓이던 클릭 프리로드도
+    // 없앤다. 그래야 ISR이 더하는 음의 bump가 중립을 기준으로 분명하게
+    // 위로 움직이고, 보통 클릭의 아래 방향과 섞이지 않는다.
+    if (useVibAxis() && P.gapBump && inGap && !s->c[k].buttonState) unit = 0.0f;
+
     // 진동 버스트 발사. 세기는 양쪽 다 heldEdge(버클링 순간의 편심)로 정한다 —
     // 누를 때와 뗄 때가 같은 값을 써야 "같은 타건에 대한 같은 피드백"이 된다.
     // vibWhen 2는 누를 때와 뗄 때 둘 다 — 같은 코드로 두 번 발사할 뿐이라,
@@ -811,7 +1084,7 @@ float sideDrive(SideState* s, const int idx[SIDE_SLOTS], SlotInfo out[SIDE_SLOTS
     bool burstMode = (P.vibWhen <= 2);
     if (useVibAxis() && burstMode && ((P.vibWhen != 1 && down) || (P.vibWhen != 0 && up))) {
       unsigned long nowUs = micros();
-      float amp = vibAmpFor(s->c[k].heldEdge);       // powf는 임계구역 밖에서
+      float amp = vibAmpFor(s->c[k].heldEdge) * vibSpeedMultiplier(speed, forceDelta);
       // vibISR()이 이 두 필드를 읽고 버스트가 끝나면 vibT0을 0으로 지운다.
       // 따로 쓰면 그 사이에 ISR이 끼어들어 새 vibT0에 이전 vibAmp가 붙는다.
       noInterrupts();
@@ -851,35 +1124,48 @@ float sideDrive(SideState* s, const int idx[SIDE_SLOTS], SlotInfo out[SIDE_SLOTS
     // 모든 접촉이 vibDur 동안 멈추면 vibContGate가 200ms 동안 1 -> 0으로 내려가고,
     // 기존 5ms 스무딩까지 거쳐 부드럽게 꺼진다. 다시 움직이면 즉시 켜진다.
     //
-    // 현재 키맵의 키캡 위에서는 편심 세기/주파수를, 그 키캡들
-    // 사이 틈에서는 vibGap/vibGapFreq를 쓴다. 주석 처리된 미사용
-    // 키 자리와 키보드 외곽은 둘 다 아니므로 조용하다.
+    // gapBump=0이면 틈에서 기존 vibGap/vibGapFreq 상시 진동을 복원한다.
+    // 켜지면 gapBumpMode에 따라 단발 bump 또는 힘 비례 변위만 쓴다.
     float vibContNow = 0.0f;
-    bool  vibContIsGap = false;
-    if (useVibAxis() && P.vibWhen == 3 && vibContGate > 0.0f && idx[k] >= 0) {
+    bool vibContIsGap = false;
+    // 속도 곱셈은 자체 배율(및 floor)이 정지 출력을 결정하므로
+    // 기존 상시 모드의 정지 타이머를 두 번 곱하지 않는다.
+    float keyContGate = P.vibSpeedMode ? 1.0f : vibContGate;
+    if (useVibAxis() && P.vibWhen == 3 && idx[k] >= 0) {
       if (onKey) {
-        vibContNow = vibAmpFor(vibEdgeNow) * vibContGate;
-      } else if (inGap) {
+        vibContNow = vibAmpFor(vibEdgeNow) * vibSpeedMultiplier(speed, forceDelta) * keyContGate;
+      } else if (inGap && !P.gapBump && vibContGate > 0.0f) {
         vibContNow = P.vibGap * 0.001f * vibContGate;
         vibContIsGap = true;
       }
     }
-    s->c[k].vibContGap = vibContIsGap;
     s->c[k].vibCont = vibContNow;
+    s->c[k].vibContGap = vibContIsGap;
 
     out[k].key     = key;
     out[k].edgeRaw = edgeRaw;
     out[k].force   = force;
     out[k].peak    = P.fPeak * forceScale(eEff);
     out[k].gain    = gain;
+    out[k].sensorPeak = peakForce;
+    out[k].sensorArea = area;
+    out[k].peakThreshold = peakThresholdAt(eEff);
+    out[k].peakHit = peakHit;
     // 텔레메트리도 같은 값을 봐야 한다. 상시에서 eEff 를 그대로 쓰면 눌린 동안
     // #tel 의 vib= 만 옛날 값에 얼어붙어서 실제 출력과 어긋난다.
     float vibNow = 0.0f;
     if (useVibAxis() && idx[k] >= 0) {
-      if (onKey) vibNow = vibAmpFor(vibEdgeNow);
-      else if (inGap) vibNow = P.vibGap * 0.001f;
+      if (onKey) vibNow = vibAmpFor(vibEdgeNow) * vibSpeedMultiplier(speed, forceDelta);
+      else if (inGap && P.gapBump && P.gapBumpMode == 0) vibNow = P.gapBumpAmp * 0.001f;
+      else if (inGap && P.gapBump && P.gapBumpMode == 1) {
+        float ratio = force / P.gapDisplaceForce;
+        if (ratio > 1.0f) ratio = 1.0f;
+        vibNow = P.gapBumpAmp * 0.001f * ratio;
+      }
+      else if (inGap && P.vibWhen == 3) vibNow = P.vibGap * 0.001f * vibContGate;
     }
-    out[k].vib = (P.vibWhen == 3) ? vibNow * vibContGate : vibNow;
+    out[k].vib = inGap ? vibNow
+                       : ((P.vibWhen == 3) ? vibNow * keyContGate : vibNow);
 
     if (P.probe && !prevBS && s->c[k].buttonState) {
       Serial.print("#probe key=");
@@ -892,12 +1178,19 @@ float sideDrive(SideState* s, const int idx[SIDE_SLOTS], SlotInfo out[SIDE_SLOTS
       Serial.print(" dy=");   Serial.print(dyRaw, 1);
       Serial.print(" eff=");  Serial.print(edge, 2);
       Serial.print(" th=");   Serial.print(out[k].peak, 0);
+      Serial.print(" pf=");   Serial.print(actPeak, 0);
+      Serial.print(" pth=");  Serial.print(out[k].peakThreshold, 0);
+      Serial.print(" src=");  Serial.print(peakHit && actForce < out[k].peak ? "peak" : "total");
       Serial.print(" gain="); Serial.print(gain, 2);
       Serial.print(" vib=");  Serial.print(out[k].vib, 3);
       // f/x가 버클링 곡선이 실제로 본 힘을 나타내야 한다. 갭에서
       // 진입한 누름은 원시 힘에서 entryForce를 뺀 actForce가 그 값이다.
       Serial.print(" f=");    Serial.print(actForce, 0);
-      Serial.print(" x=");    Serial.println(actForce / out[k].peak, 1);
+      Serial.print(" x=");    Serial.print(actForce / out[k].peak, 1);
+      Serial.print(" pr=");   Serial.print(actPeak / out[k].peakThreshold, 1);
+      Serial.print(" conc="); Serial.print(actForce > 0.0f ? actPeak / actForce : 0.0f, 2);
+      Serial.print(" area="); Serial.print(area, 0);
+      Serial.print(" dens="); Serial.println(area > 0.0f ? actForce / area : 0.0f, 3);
     }
 
     s->c[k].prevForce = force;
@@ -905,6 +1198,13 @@ float sideDrive(SideState* s, const int idx[SIDE_SLOTS], SlotInfo out[SIDE_SLOTS
     // 경쟁 가능하다. activeId는 같은 손가락의 릴리즈 꼬리를 #miss로
     // 오인하지 않게 식별자로만 남겨두며, 다른 손가락이 더 세면 바로 교체된다.
     z += P.clickScale * unit * amp;
+    // 힘 비례 변위: 틈을 누르는 동안만 중립에서 위(음의 구동)로
+    // 계속 밀어 올린다. gapDisplaceForce에서 gapBumpAmp에 도달하고 그 위는 제한한다.
+    if (useVibAxis() && P.gapBump && P.gapBumpMode == 1 && inGap && !s->c[k].buttonState) {
+      float ratio = force / P.gapDisplaceForce;
+      if (ratio > 1.0f) ratio = 1.0f;
+      z -= P.gapBumpAmp * 0.001f * ratio;
+    }
   }
   return z;
 }
@@ -933,9 +1233,21 @@ float vibSlotAmp(ContactState* c, unsigned long nowUs) {
   return c->vibAmp * sinf(PI * (float)t / (float)dur);
 }
 
+// 틈 bump는 사인을 왕복시키는 진동이 아니라 0 -> 위 -> 0으로 가는
+// 반사인 하나다. 여기서는 크기만 만들고 vibSide()에서 빼서, 양의
+// 방향인 보통 클릭과 반대(음의 구동 = 위쪽)로 낸다.
+float gapBumpSlotAmp(ContactState* c, unsigned long nowUs) {
+  if (!useVibAxis() || !P.gapBump || P.gapBumpMode != 0) { c->gapBumpT0 = 0; return 0.0f; }
+  if (!c->gapBumpT0) return 0.0f;
+  long t   = (long)(nowUs - c->gapBumpT0);
+  long dur = (long)P.gapBumpDur * 1000L;
+  if (t >= dur) { c->gapBumpT0 = 0; return 0.0f; }
+  return c->gapBumpAmp * sinf(PI * (float)t / (float)dur);
+}
+
 // vibWhen 3(상시)의 진폭. 한쪽 바에 잡힌 접촉 중 진폭이 가장 큰 하나만
 // 선택한다. 손가락 수에 따라 진폭이 더해져 커지지 않게 하기 위함이다.
-// 선택된 접촉이 키캡 위인지 틈인지에 따라 해당 목표치만 켜고, 두 성분은
+// 틈 접촉은 vibCont가 0이고 단발 bump 경로로만 나간다.
 // 각각 한 극점(one-pole)으로 따라가므로 승자가 바뀔 때도 부드럽게 교차한다.
 //
 // 스무딩이 필요한 이유: vibCont는 sideDrive()가 200Hz 프레임마다 계단으로 쓴다.
@@ -950,27 +1262,26 @@ float vibSlotAmp(ContactState* c, unsigned long nowUs) {
 
 void vibContAmps(SideState* s, float dt, float* keyAmp, float* gapAmp) {
   float maxTarget = 0.0f;
-  bool  maxIsGap = false;
+  bool maxIsGap = false;
   for (int k = 0; k < SIDE_SLOTS; k++) {
     if (s->c[k].vibCont > maxTarget) {
       maxTarget = s->c[k].vibCont;
-      maxIsGap  = s->c[k].vibContGap;
+      maxIsGap = s->c[k].vibContGap;
     }
   }
   float keyTarget = maxIsGap ? 0.0f : maxTarget;
   float gapTarget = maxIsGap ? maxTarget : 0.0f;
   float a = dt / VIB_CONT_TAU_S;
-  s->vibContS    += (keyTarget - s->vibContS)    * a;
+  s->vibContS += (keyTarget - s->vibContS) * a;
   s->vibGapContS += (gapTarget - s->vibGapContS) * a;
-  // 지수 꼬리를 끊는다. 안 그러면 손을 뗀 뒤에도 아주 작은 값이 남아 vibSide()의
-  // "amp <= 0" 분기에 영영 안 걸리고 위상이 계속 돈다.
+  // 지수 꼬리를 끊어 조용할 때 위상도 리셋되게 한다.
   if (s->vibContS < 1.0e-4f) s->vibContS = 0.0f;
   if (s->vibGapContS < 1.0e-4f) s->vibGapContS = 0.0f;
   *keyAmp = s->vibContS;
   *gapAmp = s->vibGapContS;
 }
 
-// 키캡 위와 틈 주파수의 위상을 각각 누적시킨다.
+// 키캡 진동의 위상을 누적시킨다.
 //   ★ 위상을 micros()에서 매번 다시 만들지 않는 이유: float 가수가 24비트라
 //     micros()가 커지면 t*1e-6 의 분해능이 주기보다 굵어져 주파수가 흔들린다.
 //     dt를 적분하면 그 문제가 없다.
@@ -988,8 +1299,10 @@ float vibSide(SideState* s, float* keyPhase, float* gapPhase,
   float keyCont, gapAmp;
   vibContAmps(s, dt, &keyCont, &gapAmp);
   keyAmp += keyCont;
+  float bump = 0.0f;
+  for (int k = 0; k < SIDE_SLOTS; k++) bump += gapBumpSlotAmp(&s->c[k], nowUs);
   return vibWave(keyAmp, P.vibFreq, keyPhase, dt)
-       + vibWave(gapAmp, P.vibGapFreq, gapPhase, dt);
+       + vibWave(gapAmp, P.vibGapFreq, gapPhase, dt) - bump;
 }
 
 // ── 진동 테스트 ('vib' 명령) ─────────────────────────────────────────────────
@@ -1000,6 +1313,9 @@ float vibSide(SideState* s, float* keyPhase, float* gapPhase,
 unsigned long vibTestT0  = 0;      // 0 = 꺼짐
 unsigned long vibTestDur = 0;      // us. 0 = 끌 때까지 계속
 float         vibTestAmp = 0.0f;
+unsigned long bumpTestT0  = 0;      // 수동 위쪽 bump 테스트
+unsigned long bumpTestDur = 0;
+float         bumpTestAmp = 0.0f;
 
 // ★ ISR 한 번에 한 번만 불러야 한다 (좌/우에서 각각 부르면 첫 호출이 상태를 끄고
 //   두 번째는 0을 받는다). vibISR()에서 한 번 계산해 양쪽에 나눠준다.
@@ -1009,6 +1325,13 @@ float vibTestNow(unsigned long nowUs) {
   if (vibTestDur == 0) return vibTestAmp;                 // 지속 — 봉투 없음
   if (t >= (long)vibTestDur) { vibTestT0 = 0; return 0.0f; }
   return vibTestAmp * sinf(PI * (float)t / (float)vibTestDur);
+}
+
+float bumpTestNow(unsigned long nowUs) {
+  if (!bumpTestT0) return 0.0f;
+  long t = (long)(nowUs - bumpTestT0);
+  if (t >= (long)bumpTestDur) { bumpTestT0 = 0; return 0.0f; }
+  return bumpTestAmp * sinf(PI * (float)t / (float)bumpTestDur);
 }
 
 float vibPhaseL = 0.0f, vibPhaseR = 0.0f;
@@ -1050,8 +1373,9 @@ void vibISR() {
   const float dt = 1.0f / (float)VIB_ISR_HZ;
 
   float testAmp = vibTestNow(nowUs);  // ISR 한 번에 한 번만 (좌/우가 나눠 쓴다)
-  gVibL = vibSide(&sideL, &vibPhaseL, &vibGapPhaseL, nowUs, dt, testAmp);
-  gVibR = vibSide(&sideR, &vibPhaseR, &vibGapPhaseR, nowUs, dt, testAmp);
+  float testBump = bumpTestNow(nowUs);
+  gVibL = vibSide(&sideL, &vibPhaseL, &vibGapPhaseL, nowUs, dt, testAmp) - testBump;
+  gVibR = vibSide(&sideR, &vibPhaseR, &vibGapPhaseR, nowUs, dt, testAmp) - testBump;
 
   // 두 바를 각각 갱신 -> 양손 동시 입력이 서로를 막지 않는다.
   moveBar1(clampDrive((gDriveL + gVibL) * LEFT_GAIN));
@@ -1068,27 +1392,40 @@ void resetBuckling() {
   for (int s = 0; s < 2; s++)
     for (int k = 0; k < SIDE_SLOTS; k++) {
       sides[s]->c[k].buttonState = 0;
+      sides[s]->c[k].heldByPeak  = false;
       sides[s]->c[k].heldKey     = -1;
       sides[s]->c[k].heldEdge    = 0.0f;
       sides[s]->c[k].maxForce    = 0.0f;
+      sides[s]->c[k].maxPeak     = 0.0f;
       sides[s]->c[k].wasOnKey    = false;
       sides[s]->c[k].entryForce  = 0.0f;
+      sides[s]->c[k].entryPeak   = 0.0f;
       missClear(&sides[s]->c[k]);              // 임계가 바뀌면 모아둔 에피소드도 못 믿는다
       sides[s]->c[k].missArmed   = true;
       sides[s]->c[k].vibT0       = 0;
       sides[s]->c[k].vibAmp      = 0.0f;
       sides[s]->c[k].vibCont     = 0.0f;
       sides[s]->c[k].vibContGap  = false;
+      sides[s]->c[k].gapBumpArmed = true;
+      sides[s]->c[k].gapBumpT0    = 0;
+      sides[s]->c[k].gapBumpAmp   = 0.0f;
     }
   sideL.vibContS = sideR.vibContS = 0.0f;
   sideL.vibGapContS = sideR.vibGapContS = 0.0f;
   vibAnchorCount = 0;
   vibLastMotionMs = millis();
   vibContGate = 0.0f;
+  speedPrevCount = 0;
+  speedPrevUs = 0;
+  for (int i = 0; i < SENSEL_MAX_CONTACTS; i++) {
+    ctSpeed[i] = 0.0f;
+    ctForceDelta[i] = 0.0f;
+  }
   vibPhaseL = vibPhaseR = 0.0f;
   vibGapPhaseL = vibGapPhaseR = 0.0f;
   gVibL = gVibR = 0.0f;
   vibTestT0 = 0; vibTestAmp = 0.0f;
+  bumpTestT0 = 0; bumpTestAmp = 0.0f;
   // ★ 클릭 값도 같이 지워야 한다. 안 그러면 아래 moveBar(0)을 vibISR이 다음
   //   틱(100us)에 clampDrive(gDrive + 0)으로 곧바로 덮어써서 바가 안 풀린다.
   //   loop()에서 돌던 시절에도 같은 구조였지만, 그땐 frameStep()이 곧 gDrive를
@@ -1214,7 +1551,8 @@ bool setParam(const char* name, float v) {
   // 곡선의 의미 자체가 바뀌는 것. vibWhen도 포함이다 — 버스트와 상시는 상태
   // 변수가 서로 달라서, 갈아탈 때 반대쪽 잔여물(진행 중인 버스트 / 남은 vibCont)을
   // 지워주지 않으면 바뀐 직후 한동안 두 모드가 섞여 나간다.
-  bool structural = (t->i == &P.mode) || (t->i == &P.vibWhen);
+  bool structural = (t->i == &P.mode) || (t->i == &P.vibWhen) ||
+                    (t->i == &P.gapBump) || (t->i == &P.gapBumpMode);
   int oldVibWhen = P.vibWhen;
   if (t->f) *t->f = v; else *t->i = (int)lroundf(v);
 
@@ -1237,19 +1575,65 @@ bool setParam(const char* name, float v) {
 void loadFromEeprom(bool quiet) {
   Params tmp;
   EEPROM.get(0, tmp);
+  const uint32_t P_MAGIC_V19 = 0x56434D43UL;
+  const uint32_t P_MAGIC_V18 = 0x56434D42UL;
+  const uint32_t P_MAGIC_V17 = 0x56434D41UL;
+  const uint32_t P_MAGIC_V16 = 0x56434D40UL;
+  const uint32_t P_MAGIC_V15 = 0x56434D3FUL;
+  const uint32_t P_MAGIC_V14 = 0x56434D3EUL;
+  const uint32_t P_MAGIC_V13 = 0x56434D3DUL;
+  const uint32_t P_MAGIC_V12 = 0x56434D3CUL;
   const uint32_t P_MAGIC_V11 = 0x56434D3BUL;
   const uint32_t P_MAGIC_V10 = 0x56434D3AUL;
+  bool migrateV19 = (tmp.magic == P_MAGIC_V19);
+  bool migrateV18 = (tmp.magic == P_MAGIC_V18);
+  bool migrateV17 = (tmp.magic == P_MAGIC_V17);
+  bool migrateV16 = (tmp.magic == P_MAGIC_V16);
+  bool migrateV15 = (tmp.magic == P_MAGIC_V15);
+  bool migrateV14 = (tmp.magic == P_MAGIC_V14);
+  bool migrateV13 = (tmp.magic == P_MAGIC_V13);
+  bool migrateV12 = (tmp.magic == P_MAGIC_V12);
   bool migrateV11 = (tmp.magic == P_MAGIC_V11);
   bool migrateV10 = (tmp.magic == P_MAGIC_V10);
-  if (tmp.magic != P_MAGIC && !migrateV11 && !migrateV10) {
+  if (tmp.magic != P_MAGIC && !migrateV19 && !migrateV18 && !migrateV17 && !migrateV16 && !migrateV15 && !migrateV14 && !migrateV13 && !migrateV12 && !migrateV11 && !migrateV10) {
     if (!quiet) Serial.println("#err eeprom empty");
     return;
   }
   // VCM10의 vibDur는 상시 모드에서 무시되던 값이라 2초로 옮긴다.
   // VCM10/11은 구조 끝에 vibMove가 없었으므로 기존 고정값 5mm를 채운다.
-  if (migrateV11 || migrateV10) {
+  // VCM10~12에는 gapBump* 필드가 없고 VCM13에는 토글이 없다.
+  // VCM14까지의 기본 문턱 90은 버클링 시점과 겹치므로 1로 옮긴다.
+  // VCM15에는 힘 비례 변위의 풀스케일 필드가 없다.
+  // VCM16 이하에는 이동 속도 배율 필드가 없고, VCM17에는 floor/pressFull이 없다.
+  if (migrateV19 || migrateV18 || migrateV17 || migrateV16 || migrateV15 || migrateV14 || migrateV13 || migrateV12 || migrateV11 || migrateV10) {
     if (migrateV10 && tmp.mode == 3 && tmp.vibWhen == 3) tmp.vibDur = 2000;
-    tmp.vibMove = 5.0f;
+    if (migrateV11 || migrateV10) tmp.vibMove = 5.0f;
+    if (!migrateV19 && !migrateV18 && !migrateV17 && !migrateV16 && !migrateV15 && !migrateV14 && !migrateV13) {
+      tmp.gapBumpAmp   = 400.0f;
+      tmp.gapBumpForce = 90.0f;
+      tmp.gapBumpDur   = 35;
+    }
+    if (!migrateV19 && !migrateV18 && !migrateV17 && !migrateV16 && !migrateV15 && !migrateV14) tmp.gapBump = 1;
+    if (!migrateV19 && !migrateV18 && !migrateV17 && !migrateV16 && !migrateV15) tmp.gapBumpForce = 1.0f;
+    if (!migrateV19 && !migrateV18 && !migrateV17 && !migrateV16) {
+      tmp.gapBumpMode = 0;
+      tmp.gapDisplaceForce = 300.0f;
+    }
+    if (!migrateV19 && !migrateV18 && !migrateV17) {
+      tmp.vibSpeedMode = 0;
+      tmp.vibSpeedMin = 20.0f;
+      tmp.vibSpeedMax = 500.0f;
+    }
+    if (!migrateV19 && !migrateV18) {
+      tmp.vibSpeedFloor = 100.0f;
+      tmp.vibPressFull = 20.0f;
+    }
+    if (!migrateV19) {
+      tmp.peakEnable = 1;
+      tmp.peakThreshold = 7.0f;
+      tmp.peakMinTotal = 20.0f;
+    }
+    tmp.peakAreaMax = 115.0f;
     tmp.magic = P_MAGIC;
     EEPROM.put(0, tmp);
   }
@@ -1329,6 +1713,25 @@ void handleCommand(char* line) {
       Serial.println(ms > 0 ? "" : " (계속 — 'vib 0' 으로 정지)");
     }
   }
+  else if (ieq(cmd, "bump") || ieq(cmd, "b")) {
+    // 접촉/모드와 관계없이 실제 gap bump와 같은 음의 반사인을 양쪽에 낸다.
+    // 위/아래 극성과 둥근 돌출감을 손으로 확인하는 용도다.
+    float a = a1 ? atof(a1) : P.gapBumpAmp;
+    long ms = a2 ? atol(a2) : (long)P.gapBumpDur;
+    if (a < 0) a = 0;
+    if (a > 1000) a = 1000;
+    if (ms < 5) ms = 5;
+    if (ms > 300) ms = 300;
+    unsigned long now = micros();
+    noInterrupts();
+    bumpTestT0  = (a > 0) ? (now ? now : 1) : 0;
+    bumpTestDur = (unsigned long)ms * 1000UL;
+    bumpTestAmp = a * 0.001f;
+    interrupts();
+    Serial.print("#ok bumptest amp="); Serial.print((int)a);
+    Serial.print(" ms="); Serial.print(ms);
+    Serial.println(" dir=up");
+  }
   else if (ieq(cmd, "ping")) {
     Serial.println("#pong vcm-tune");
   }
@@ -1355,16 +1758,22 @@ void pollSerial() {
 // 한쪽당 힘이 큰 슬롯 하나만 보낸다. UI가 지금 어느 키를 얼마로 누르고 있는지
 // 보여주는 용도라 두 슬롯을 다 보낼 이유가 없다.
 elapsedMillis telTimer;
+bool telHadContacts = false;  // 접촉이 끝날 때 빈 상태를 한 번만 보내기 위함
 
 void printSlot(char tag, const SlotInfo in[SIDE_SLOTS]) {
-  int b = (in[1].force > in[0].force) ? 1 : 0;
+  int b = (contactStrength(in[1].force, in[1].sensorPeak, in[1].sensorArea) >
+           contactStrength(in[0].force, in[0].sensorPeak, in[0].sensorArea)) ? 1 : 0;
   Serial.print(' '); Serial.print(tag); Serial.print('=');
   Serial.print(in[b].key);                  Serial.print(',');
   Serial.print(in[b].edgeRaw, 2);           Serial.print(',');
   Serial.print(in[b].force, 0);             Serial.print(',');
   Serial.print(in[b].peak, 0);              Serial.print(',');
   Serial.print(in[b].gain, 2);   Serial.print(',');
-  Serial.print(in[b].vib, 3);
+  Serial.print(in[b].vib, 3);                Serial.print(',');
+  Serial.print(in[b].sensorPeak, 0);          Serial.print(',');
+  Serial.print(in[b].peakThreshold, 0);       Serial.print(',');
+  Serial.print(in[b].peakHit ? 1 : 0);        Serial.print(',');
+  Serial.print(in[b].sensorArea, 0);
 }
 
 void sendTelemetry() {
@@ -1393,17 +1802,23 @@ void setup() {
   loadFromEeprom(true);        // 저장된 게 있으면 그걸로 덮는다
   CAL_OX = P.calOX; CAL_OY = P.calOY;
 
-  loopTimer = 0; telTimer = 0;
+  loopTimer = 0; telTimer = 0; telHadContacts = false;
   for (int k = 0; k < SIDE_SLOTS; k++) {
     sideL.c[k].buttonState = 0; sideL.c[k].prevForce = 0.0f; sideL.c[k].activeId = -1;
     sideR.c[k].buttonState = 0; sideR.c[k].prevForce = 0.0f; sideR.c[k].activeId = -1;
+    sideL.c[k].heldByPeak = false; sideR.c[k].heldByPeak = false;
     sideL.c[k].heldKey = -1;    sideR.c[k].heldKey = -1;
     missClear(&sideL.c[k]);     missClear(&sideR.c[k]);
     sideL.c[k].missArmed = true; sideR.c[k].missArmed = true;
     sideL.c[k].heldEdge = 0.0f; sideR.c[k].heldEdge = 0.0f;
     sideL.c[k].maxForce = 0.0f; sideR.c[k].maxForce = 0.0f;
+    sideL.c[k].maxPeak = 0.0f; sideR.c[k].maxPeak = 0.0f;
     sideL.c[k].wasOnKey = false; sideR.c[k].wasOnKey = false;
     sideL.c[k].entryForce = 0.0f; sideR.c[k].entryForce = 0.0f;
+    sideL.c[k].entryPeak = 0.0f; sideR.c[k].entryPeak = 0.0f;
+    sideL.c[k].gapBumpArmed = true; sideR.c[k].gapBumpArmed = true;
+    sideL.c[k].gapBumpT0 = 0;       sideR.c[k].gapBumpT0 = 0;
+    sideL.c[k].gapBumpAmp = 0.0f;   sideR.c[k].gapBumpAmp = 0.0f;
   }
   frame.n_contacts = 0; nContacts = 0; frameDrops = 0; dropTotal = 0;
 
@@ -1426,6 +1841,10 @@ void setup() {
   Serial.println("ms 잠금). 'h' + Enter 로 토글. ===");
   Serial.println("=== 명령: set <name> <v> / get / defaults <0|1|2|3> / save / load ===");
   Serial.println("===       vib [0~1000] [ms]  진동 테스트 (ms=0 이면 계속, 'vib 0' 정지) ===");
+  Serial.println("===       bump [0~1000] [ms] 위쪽 틈 bump 테스트 ===");
+  Serial.println("=== 힘 로그: f/fmax=total, pf/pfmax=peak, th/pth=임계, x/pr=임계 비율 ===");
+  Serial.println("===           conc=peak/total, area=접촉 면적, dens=total/area ===");
+  Serial.println("===           #probe=키다운, #rel=성공 타건 최댓값, #miss=실패 타건 최댓값 ===");
   printCfg();
 }
 
@@ -1447,12 +1866,14 @@ void loop() {
 void frameStep() {
   // 읽기에 실패하면 직전 프레임을 그대로 유지한다. 매번 0으로 밀면
   // 드롭 한 번에 구동값이 0으로 떨어졌다 복귀하면서 바가 튄다.
-  if (senselGetFrame(&frame)) { frameDrops = 0; }
+  bool freshFrame = senselGetFrame(&frame);
+  if (freshFrame) { frameDrops = 0; }
   else {
     frameDrops++; dropTotal++;
     if (frameDrops >= P.maxFrameDrops) frame.n_contacts = 0;
   }
   classifyContacts();
+  if (freshFrame) updateContactSpeeds();
   updateVibMotionGate();
 
   int idxL[SIDE_SLOTS], idxR[SIDE_SLOTS];
@@ -1469,7 +1890,11 @@ void frameStep() {
 
   if (P.telHz > 0 && telTimer >= (unsigned long)(1000 / P.telHz)) {
     telTimer = 0;
-    sendTelemetry();
+    bool hasContacts = nContacts > 0;
+    // 유휴 상태를 매 주기 도배하지 않는다. 접촉 중에는 기존처럼
+    // 주기적으로 보내고, 손을 떼면 UI 초기화용 빈 프레임을 한 번만 보낸다.
+    if (hasContacts || telHadContacts) sendTelemetry();
+    telHadContacts = hasContacts;
   }
 
   if (P.verbose) {

@@ -21,9 +21,14 @@ typedef struct __attribute__((__packed__))
     float y_pos;
     float total_force;
     float area;
-    float orientation;
-    float major_axis;
-    float minor_axis;
+    // Ellipse contact mask(0x01)은 현재 제어에서 쓰지 않아 비활성화했다.
+    // float orientation;
+    // float major_axis;
+    // float minor_axis;
+    // 같은 6바이트 자리에 Peak contact mask(0x08)를 받는다.
+    float peak_x;
+    float peak_y;
+    float peak_force;
 } SenselContact;
 
 //Max number of contacts a frame can hold
@@ -59,6 +64,12 @@ typedef struct __attribute__((__packed__))
 
 //Flag for enabling contact scanning
 const byte SENSEL_REG_CONTACTS_FLAG = 0x04;
+
+// Sensel 공식 optional-contact mask: ellipse=0x01, deltas=0x02,
+// bounding-box=0x04, peak=0x08. Ellipse 대신 Peak만 요청하면 contact당
+// 패킷 크기는 기존과 같은 16바이트로 유지된다.
+const byte SENSEL_CONTACTS_MASK_ELLIPSE = 0x01;
+const byte SENSEL_CONTACTS_MASK_PEAK    = 0x08;
 
 //Ack for read register
 const byte SENSEL_PT_READ_ACK = 1;

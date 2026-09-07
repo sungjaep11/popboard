@@ -29,6 +29,12 @@ void senselSetFrameContent(byte content)
   senselWriteReg(SENSEL_REG_FRAME_CONTENT_CONTROL, 1, content);
 }
 
+//Set optional fields returned for each contact.
+void senselSetContactsMask(byte mask)
+{
+  senselWriteReg(SENSEL_REG_CONTACTS_MASK, 1, mask);
+}
+
 //Start scanning on Sensel device
 void senselStartScanning()
 {
@@ -197,9 +203,10 @@ bool senselGetFrame(SenselFrame *frame)
     frame->contacts[i].y_pos = _convertBytesToU16(rx_buf[offset+4], rx_buf[offset+5])/256.0f;
     frame->contacts[i].total_force = _convertBytesToU16(rx_buf[offset+6], rx_buf[offset+7])/8.0f;
     frame->contacts[i].area = _convertBytesToU16(rx_buf[offset+8], rx_buf[offset+9])/1.0f;
-    frame->contacts[i].orientation = _convertBytesToS16(rx_buf[offset+10], rx_buf[offset+11])/16.0f;
-    frame->contacts[i].major_axis = _convertBytesToU16(rx_buf[offset+12], rx_buf[offset+13])/256.0f;
-    frame->contacts[i].minor_axis = _convertBytesToU16(rx_buf[offset+14], rx_buf[offset+15])/256.0f;
+    // Ellipse(orientation/major/minor)는 주석 처리하고 같은 6바이트에 Peak를 받는다.
+    frame->contacts[i].peak_x = _convertBytesToU16(rx_buf[offset+10], rx_buf[offset+11])/256.0f;
+    frame->contacts[i].peak_y = _convertBytesToU16(rx_buf[offset+12], rx_buf[offset+13])/256.0f;
+    frame->contacts[i].peak_force = _convertBytesToU16(rx_buf[offset+14], rx_buf[offset+15])/8.0f;
   }
 
   senselLastStatus = SENSEL_OK;
@@ -247,9 +254,10 @@ void senselGetFrame_OLD(SenselFrame *frame)
       frame->contacts[i].y_pos = _convertBytesToU16(rx_buf[offset+4],rx_buf[offset+5])/256.0f;
       frame->contacts[i].total_force = _convertBytesToU16(rx_buf[offset+6],rx_buf[offset+7])/8.0f;
       frame->contacts[i].area = _convertBytesToU16(rx_buf[offset+8],rx_buf[offset+9])/1.0f;
-      frame->contacts[i].orientation = _convertBytesToS16(rx_buf[offset+10],rx_buf[offset+11])/16.0f;
-      frame->contacts[i].major_axis = _convertBytesToU16(rx_buf[offset+12],rx_buf[offset+13])/256.0f;
-      frame->contacts[i].minor_axis = _convertBytesToU16(rx_buf[offset+14],rx_buf[offset+15])/256.0f;
+      // Ellipse 대신 Peak contact data (contact mask 0x08).
+      frame->contacts[i].peak_x = _convertBytesToU16(rx_buf[offset+10],rx_buf[offset+11])/256.0f;
+      frame->contacts[i].peak_y = _convertBytesToU16(rx_buf[offset+12],rx_buf[offset+13])/256.0f;
+      frame->contacts[i].peak_force = _convertBytesToU16(rx_buf[offset+14],rx_buf[offset+15])/8.0f;
     }
   }
   else{
@@ -270,8 +278,9 @@ void senselPrintFrame(SenselFrame *frame){
       SenselDebugSerial.print(" y_pos ");
       SenselDebugSerial.print(frame->contacts[i].y_pos);
       SenselDebugSerial.print(" total_force ");
-      SenselDebugSerial.println(frame->contacts[i].total_force);
+      SenselDebugSerial.print(frame->contacts[i].total_force);
+      SenselDebugSerial.print(" peak_force ");
+      SenselDebugSerial.println(frame->contacts[i].peak_force);
     }
   #endif
 }
-

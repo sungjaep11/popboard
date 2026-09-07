@@ -13,6 +13,7 @@ struct ContactState {
   // 엉뚱한 키가 릴리즈되고 원래 키는 눌린 채 고착된다. 진짜 키보드처럼
   // "누른 순간의 키"를 뗄 때까지 유지해야 한다.
   int   heldKey;
+  bool  heldByPeak;    // peak 경로로 눌렀으면 peak 히스테리시스로 해제
 
   // 버클링 순간의 키 중심으로부터의 거리(0~1)를 같이 래치한다. 임계힘 배수와
   // 변위 프리로드가 둘 다 여기서 나온다.
@@ -29,11 +30,13 @@ struct ContactState {
   // 증가량에서 버클링한다. 처음부터 키 위인 타건은 entryForce=0이다.
   bool  wasOnKey;
   float entryForce;
+  float entryPeak;     // 갭 -> 키 진입 시 peak_force 기준점
 
   // 버클링한 뒤 뗄 때까지 이 접촉이 준 최대 힘. 릴리즈할 때 #rel 한 줄로 내보낸다.
   // #probe 가 찍는 f 는 임계를 막 넘긴 그 프레임의 힘이라 "얼마나 세게 내리쳤나"를
   // 말해주지 못한다 — 사람은 보통 클릭을 느낀 뒤에도 한참 더 눌러 넣는다.
   float maxForce;
+  float maxPeak;       // 같은 누름에서의 최대 peak_force (#rel pfmax)
 
   // ── 미인식 타건 (#miss) ──────────────────────────────────────────────────
   // 버클링에 못 닿고 끝난 누름 하나를 여기 모은다. 두 갈래가 있다:
@@ -56,6 +59,8 @@ struct ContactState {
   //           아래로 내려와 풀린 그 순간)가 곧바로 "버클링 못 한 누름"으로
   //           보여서, 정상 타건마다 #miss 가 하나씩 따라붙는다.
   float missMax, missAct;
+  float missPeakMax;   // 버클링 실패 에피소드의 최대 peak_force
+  float missArea;      // missMax가 나온 프레임의 접촉 면적
   float missEdge, missDx, missDy, missPx, missPy;
   int   missKey;
   bool  missOn;
@@ -79,11 +84,14 @@ struct ContactState {
   //           상시는 매 프레임 현재 위치로 다시 쓴다. 목적이 "누르지 않고
   //           어루만져서 모서리를 찾는 것"이라 손가락을 따라와야 하기 때문이다.
   //           접촉이 없으면 반드시 0이어야 한다 (아래 SideState 주석 참고).
-  // vibContGap : 이 상시 성분이 키캡 위가 아니라 틈 위의 접촉인지.
-  //              틈은 vibGapFreq, 키캡 위는 vibFreq로 서로 다른 위상을
-  //              쓴다. 같은 손의 두 접촉이 섞여도 두 주파수가 모두 남는다.
   float vibCont;
   bool  vibContGap;
+
+  // 키 틈 bump는 양의 클릭 방향과 반대인 음의 반사인 파형 한 번이다.
+  // armed는 누른 채 계속 있을 때 반복 발사되지 않게 하는 히스테리시스다.
+  bool          gapBumpArmed;
+  unsigned long gapBumpT0;
+  float         gapBumpAmp;
 };
 
 // bar 하나(한쪽 손)의 독립 상태. 좌/우가 각자 버클링 상태를 가져야
@@ -92,10 +100,8 @@ struct ContactState {
 // 버클링 중에만 접촉 ID를 고정하고, 버클링 전과 릴리즈 후에는
 // 힘이 더 큰 접촉이 슬롯을 가져간다. 레스팅 손가락이 슬롯을 독점하지 않게 한다.
 //
-// vibContS / vibGapContS : 키캡 / 틈 vibCont 합을 각각 매끄럽게 따라가는
-//                           값. vibISR 소유다. vibCont 는 200Hz 프레임마다
-//                           계단으로 갱신되므로 그대로 내보내지 않고 두
-//                           상시 성분을 독립적으로 스무딩한다.
+// vibContS / vibGapContS : 키캡 / 틈 vibCont를 매끄럽게 따라가는 값.
+//                           gapBump가 1/2이면 틈 진동 성분은 0이다.
 //
 // NOTE: Arduino IDE는 함수 프로토타입을 #include 직후에 자동 삽입하므로,
 //       함수 인자로 쓰이는 타입은 .ino 본문이 아니라 헤더에 있어야 한다.
