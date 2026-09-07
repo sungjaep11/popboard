@@ -15,12 +15,13 @@ logs/
     position-1-phrases.csv    문장 하나 = 한 줄
     position-1-keys.csv       키 하나 = 한 줄
     position-1-presses.csv    타건(버클링) 하나 = 한 줄
+    position-1-misses.csv     눌렀는데 글자가 안 나온 누름 하나 = 한 줄
 """
 import http.server, json, os, re, socketserver, sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 LOGS = os.path.join(ROOT, 'logs')
-KINDS = ('phrases', 'keys', 'presses')
+KINDS = ('phrases', 'keys', 'presses', 'misses')
 DIR_RE = re.compile(r'^[a-z0-9]+-\d+$')       # 경로 탈출 방지. 서버가 만든 이름만 통과한다
 MODE_RE = re.compile(r'^[a-z0-9]+$')
 BOM = '﻿'                                # 엑셀이 UTF-8 로 열도록
