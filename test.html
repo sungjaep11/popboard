@@ -294,6 +294,7 @@
     <button id="t-eeload">EEPROM 복원</button>
     <div class="sep"></div>
     <button id="t-vibtest">진동 테스트</button>
+    <button id="t-bumptest">위쪽 bump 테스트</button>
     <button id="t-vibhold">계속 울리기</button>
     <div class="sep"></div>
     <button id="t-hid" class="danger">HID 타이핑 끄기</button>
@@ -307,22 +308,22 @@
     <div class="tcol"><h3>force displacement curve</h3><div id="g-curve"></div></div>
     <div class="tstack">
       <div class="tcol"><h3>위치 의존</h3><div id="g-pos"></div></div>
-      <div class="tcol"><h3>진동 · beta (mode 3)</h3><div id="g-vib"></div></div>
+      <div class="tcol"><h3>진동 + 틈 bump · beta (mode 3)</h3><div id="g-vib"></div></div>
       <div class="tcol"><h3>센서 캘리브레이션</h3><div id="g-sys"></div></div>
     </div>
   </div>
 
   <div class="tlive">
     <div class="lv"><div class="k">L 키</div><div class="v" id="lv-lkey">–</div></div>
-    <div class="lv"><div class="k">L 힘 / 임계</div><div class="v" id="lv-lf">–</div>
+    <div class="lv"><div class="k">L total·peak / 임계</div><div class="v" id="lv-lf">–</div>
       <div class="bar"><i id="lv-lbar"></i></div></div>
     <div class="lv"><div class="k">L 편심</div><div class="v" id="lv-le">–</div></div>
-    <div class="lv"><div class="k">L 진동</div><div class="v" id="lv-lv">–</div></div>
+    <div class="lv"><div class="k">L 진동 / bump</div><div class="v" id="lv-lv">–</div></div>
     <div class="lv"><div class="k">R 키</div><div class="v" id="lv-rkey">–</div></div>
-    <div class="lv"><div class="k">R 힘 / 임계</div><div class="v" id="lv-rf">–</div>
+    <div class="lv"><div class="k">R total·peak / 임계</div><div class="v" id="lv-rf">–</div>
       <div class="bar"><i id="lv-rbar"></i></div></div>
     <div class="lv"><div class="k">R 편심</div><div class="v" id="lv-re">–</div></div>
-    <div class="lv"><div class="k">R 진동</div><div class="v" id="lv-rv">–</div></div>
+    <div class="lv"><div class="k">R 진동 / bump</div><div class="v" id="lv-rv">–</div></div>
     <div class="lv"><div class="k">드롭</div><div class="v" id="lv-drop">–</div></div>
   </div>
 
@@ -615,7 +616,7 @@ function loadPhrase(){
   const raw = PHRASES[order[cursor % order.length]];
   target = optLower.checked ? raw.toLowerCase() : raw;
   typed = ''; tStart = 0; tLast = 0; locked = false;
-  pKeys = 0; pBack = 0; curPresses = []; curKeys = [];
+  pKeys = 0; pBack = 0; curPresses = []; curMisses = []; curKeys = [];
   $('test').classList.remove('done');
   render();
 }
@@ -731,6 +732,7 @@ function commitPhrase(){
    타건 자체는 버리지 않는다 (문장 통계에는 그대로 들어간다). */
 const PAIR_MS = 250;
 let curPresses = [];              // 이번 문장에서 잡힌 타건
+let curMisses = [];               // 버클링에 못 닿아 글자가 안 나온 누름 (#miss)
 let curKeys = [];                 // 이번 문장의 키 입력 (친 순서 그대로)
 let pendPress = [], pendKey = []; // 아직 짝을 못 만난 쪽
 
@@ -766,7 +768,11 @@ function noteKey(kind, code, ch, pos){
 addEventListener('vcm-press', e => {
   const d = e.detail, now = performance.now();
   const pr = {t:now, code:probeCode(d.key), key:d.key, mm:d.mm, edge:d.edge,
-              eff:d.eff, th:d.th, gain:d.gain, f:d.f, ch:'', pos:''};
+              dx:d.dx, dy:d.dy,
+              eff:d.eff, th:d.th, f:d.f, x:d.x,
+              pth:d.pth, pf:d.pf, pr:d.pr, src:d.src,
+              area:d.area, dens:d.dens, conc:d.conc,
+              gain:d.gain, ch:'', pos:''};
   if (isFinite(pr.mm)){ session.offSum += Math.abs(pr.mm); session.offN++; }
 
   prune(pendKey, now);
@@ -779,13 +785,25 @@ addEventListener('vcm-press', e => {
   updateStats();
 });
 
+/* #miss = 버클링에 못 닿고 끝난 누름. 글자가 안 나왔으므로 짝지을 키 이벤트가
+   아예 없다 — pendKey/pendPress 를 안 거치고 그냥 시각과 함께 쌓아둔다.
+   어느 글자 자리였는지는 ms(문장 첫 키 기준 경과)로 나중에 맞춘다. */
+addEventListener('vcm-miss', e => {
+  const d = e.detail;
+  curMisses.push({t:performance.now(), key:d.key, why:d.why, mm:d.mm, edge:d.edge,
+                  dx:d.dx, dy:d.dy, px:d.px, py:d.py, th:d.th, f:d.f, af:d.af, x:d.x,
+                  pth:d.pth, pf:d.pf, pr:d.pr, conc:d.conc, area:d.area, dens:d.dens});
+});
+
 // 릴리즈는 키다운보다 100 ms 남짓 늦게 온다. 줄을 새로 만들지 않고, 아직 릴리즈를
 // 못 받은 같은 키의 가장 최근 타건에 최대힘을 얹는다 (같은 키를 연타해도 순서대로 맞는다).
 addEventListener('vcm-release', e => {
   const d = e.detail;
   for (let i = curPresses.length - 1; i >= 0; i--) {
     const p = curPresses[i];
-    if (p.key === d.key && p.fmax === undefined) { p.fmax = d.fmax; return; }
+    if (p.key === d.key && p.fmax === undefined) {
+      p.fmax = d.fmax; p.pfmax = d.pfmax; return;
+    }
   }
 });
 
@@ -810,8 +828,14 @@ function pressStats(list){
    끝낼 때마다 그 안의 CSV 세 개에 바로 이어 붙인다. 페이지엔 아무것도 안 남으니
    새로고침하든 창을 닫든 이미 쓴 줄은 그대로 디스크에 있다. */
 const LOG_PARAMS = ['fPeak','fValley','fEnd','zPeak','zValley','zEnd',
+                    'peakEnable','peakThreshold','peakMinTotal','peakAreaMax',
                     'deadband','gainMin','ampCurve','fEdgeScale','fEdgeCurve',
-                    'vibWhen','vibCenter','vibEdge','vibCurve','vibFreq','vibDur','vibDelay'];
+                    'vibWhen','gapBump','gapBumpMode','vibCenter','vibEdge','vibGap','vibCurve','vibFreq','vibGapFreq','vibDur','vibMove','vibDelay',
+                    'vibSpeedMode','vibSpeedFloor','vibPressFull','vibSpeedMin','vibSpeedMax',
+                    'gapBumpAmp','gapBumpForce','gapBumpDur','gapDisplaceForce',
+                    // 햅틱 조건은 아니고 기록 설정이다. misses.csv 를 읽으려면
+                    // "몇 뉴턴부터 셌나"를 같이 알아야 해서 여기 박아둔다.
+                    'missMin'];
 const LOG_COLS = ['ts','tag','idx','target','typed','is','sec','wpm','acc','err',
                   'keys','bksp','ikiMean','ikiSD',
                   'offN','offUnpaired','offMean','offSD','offMax','offEdge',
@@ -819,10 +843,30 @@ const LOG_COLS = ['ts','tag','idx','target','typed','is','sec','wpm','acc','err'
 // 키 하나 = 한 줄. 친 순서 그대로의 입력 스트림 (교정된 오타까지 남는다)
 const KEY_COLS   = ['pts','tag','idx','seq','ms','iki','kind','ch','code','pos'];
 // 타건(버클링) 하나 = 한 줄. pts로 문장 줄과, ms로 키 줄과 이어 붙인다
-//   f    = 버클링하는 그 프레임의 힘 (임계를 막 넘긴 값)
+//   dx,dy = 키 중심에서의 부호 있는 오프셋(mm). +x 오른쪽, +y 아래(사용자 쪽).
+//          mm/edge 는 이 둘을 max 로 뭉갠 크기라 방향이 없다. 키별 계통 편향을
+//          보려면 부호가 필요하다. key="-"(갭)인 줄은 기준 키가 없어 0이니 버릴 것.
+//   f    = 버클링하는 그 프레임의 total_force (임계를 막 넘긴 값)
+//   pf/pth/pr = 같은 프레임의 peak_force / peak 임계 / 그 비율.
+//   src  = 키다운을 먼저 만든 경로(total 또는 peak).
 //   fmax = 뗄 때까지 준 최대 힘. 클릭을 느낀 뒤에도 얼마나 더 눌러 넣는지가 여기 남는다.
 //          릴리즈 줄(#rel)이 늦게 오므로 문장의 마지막 타건은 비어 있을 수 있다.
-const PRESS_COLS = ['pts','tag','idx','ms','pos','ch','key','mm','edge','eff','th','gain','f','fmax'];
+//   pfmax= 떼 때까지의 최대 peak_force.
+const PRESS_COLS = ['pts','tag','idx','ms','pos','ch','key','mm','dx','dy','edge','eff',
+                    'th','f','x','pth','pf','pr','src','gain','area','dens','conc','fmax','pfmax'];
+/* misses.csv — 눌렀는데 글자가 안 나온 누름. presses.csv 와 섞지 않는다: 저쪽은
+   "친 글자 하나"가 한 줄이라 편심 통계의 모집단이고, 이쪽은 애초에 글자가 없다.
+   why  = gap  키캡 사이 빈 띠. 임계와 무관하게 버클링이 막혀 있다.
+        = weak 키캡 위인데 그 자리 임계(th)에 못 미쳤다. mode 2(force)의 엣지에서 나온다.
+   key  = 기준 키. gap 이면 "제일 가까운 키"이므로 어느 틈인지를 이걸로 읽는다.
+   edge = 그 키 중심으로부터의 정규화 거리. 1.0 을 넘으면 키캡 밖(=gap)이다.
+   dx/dy= 그 키 중심 기준 부호 있는 오프셋(mm). px/py = 센서 원좌표(mm).
+   f    = 이 누름의 최대 원시 힘. af = 같은 순간 버클링 판정에 실제로 쓴 힘.
+   x    = af/th. weak 줄에서 1 에 가까울수록 아깝게 놓친 타건.
+   pf/pth/pr = peak_force 최댓값 / peak 임계 / 비율. conc = pf/f.
+   area = 최대 total 프레임의 접촉 면적. dens = f/area. */
+const MISS_COLS = ['pts','tag','idx','ms','key','why','mm','dx','dy','px','py','edge','th','f','af','x',
+                   'pth','pf','pr','conc','area','dens'];
 // 폴더 이름에 쓸 모드 이름. 튜너의 MODES(0=equal …)와 순서를 맞춘다
 const MODE_SLUG = ['equal','position','force','beta'];
 
@@ -857,6 +901,7 @@ async function startLogging(){
     phrases: csvHeader(LOG_COLS),
     keys:    csvHeader(KEY_COLS),
     presses: csvHeader(PRESS_COLS),
+    misses:  csvHeader(MISS_COLS),
   }});
   logDir = j.dir;
   nPhrase = nKey = nPress = 0;
@@ -928,7 +973,14 @@ function logRecord(){
   }));
   const pressRows = curPresses.map(p => ({
     pts:r.ts, tag:r.tag, idx:r.idx, ms:rel(p.t), pos:p.pos, ch:p.ch, key:p.key,
-    mm:p.mm, edge:p.edge, eff:p.eff, th:p.th, gain:p.gain, f:p.f, fmax:p.fmax,
+    mm:p.mm, dx:p.dx, dy:p.dy, edge:p.edge, eff:p.eff,
+    th:p.th, f:p.f, x:p.x, pth:p.pth, pf:p.pf, pr:p.pr, src:p.src,
+    gain:p.gain, fmax:p.fmax, pfmax:p.pfmax,
+  }));
+  const missRows = curMisses.map(p => ({
+    pts:r.ts, tag:r.tag, idx:r.idx, ms:rel(p.t), key:p.key, why:p.why,
+    mm:p.mm, dx:p.dx, dy:p.dy, px:p.px, py:p.py, edge:p.edge,
+    th:p.th, f:p.f, af:p.af, x:p.x,
   }));
 
   nPhrase++; nKey += keyRows.length; nPress += pressRows.length;
@@ -937,6 +989,7 @@ function logRecord(){
     phrases: csvBody(LOG_COLS,   [r]),
     keys:    csvBody(KEY_COLS,   keyRows),
     presses: csvBody(PRESS_COLS, pressRows),
+    misses:  csvBody(MISS_COLS,   missRows),
   });
   // 목표를 채웠으면 여기서 끝낸다. 방금 문장은 이미 큐에 올려놨으니 빠지지 않는다.
   if (logLimit && nPhrase >= logLimit){ logging = false; logDone = true; showDoneCard(); }
@@ -1119,7 +1172,7 @@ updateLogUI();
    위 타이핑 테스트와는 전역을 공유하지 않도록 IIFE로 싸둔다 (light() / mapped 만 읽는다).
 
    프로토콜은 vcm-tune.ino 헤더 참고:
-     보내기 : set <name> <v> / get / defaults <0|1|2> / save / load / hid <0|1>
+     보내기 : set <name> <v> / get / defaults <0|1|2|3> / save / load / hid <0|1>
      받기   : #cfg #ok #err #probe #rel #tel #hid  (기계가 읽는 줄은 전부 '#'로 시작)
 
    기기가 없어도 값 편집과 #define 스니펫 생성은 그대로 동작한다.
@@ -1140,13 +1193,25 @@ const MODES = [
   {v:0, name:'equal-haptic', desc:''},
   {v:1, name:'vcm-position', desc:''},
   {v:2, name:'vcm-force', desc:''},
-  {v:3, name:'beta-vibration', desc:'클릭은 mode 0과 동일 — 위치는 진동으로만'},
+  {v:3, name:'beta-vibration', desc:'키 위는 편심 진동, 틈은 진동/bump 토글'},
 ];
 
 const PARAMS = [
   {k:'fPeak',      g:'curve', def:'F_PEAK',        label:'F_PEAK',      min:20,  max:600, step:1,    dec:0},
   {k:'fValley',    g:'curve', def:'F_VALLEY',      label:'F_VALLEY',    min:0,   max:600, step:1,    dec:0},
   {k:'fEnd',       g:'curve', def:'F_END',         label:'F_END',       min:1,   max:600, step:1,    dec:0},
+  {k:'peakEnable', g:'curve', def:'PEAK_ENABLE', label:'PEAK 하이브리드', type:'toggle', dec:0,
+   offLabel:'꺼짐 · total만', onLabel:'켜짐 · total OR peak',
+   hint:'키다운에만 peak_force 보조 경로를 추가한다. 키업은 기존 total_force 히스테리시스를 유지한다.'},
+  {k:'peakThreshold', g:'curve', def:'PEAK_THRESHOLD', label:'PEAK_THRESHOLD', min:5, max:200, step:1, dec:0,
+   nmin:1, nmax:1000,
+   hint:'키 중심의 peak_force 키다운 임계(gf). mode 2에서는 total 임계와 같은 위치 배수가 적용된다.'},
+  {k:'peakMinTotal', g:'curve', def:'PEAK_MIN_TOTAL', label:'PEAK_MIN_TOTAL', min:0, max:100, step:1, dec:0,
+   nmin:0, nmax:2000,
+   hint:'단일 센서 셀의 잡음으로 오작동하지 않도록 peak 경로를 허용할 최소 total_force(gf).'},
+  {k:'peakAreaMax', g:'curve', def:'PEAK_AREA_MAX', label:'PEAK_AREA_MAX', min:0, max:400, step:1, dec:0,
+   nmin:0, nmax:2000,
+   hint:'이 면적 이하의 작은 접촉에서만 peak 보조 경로를 허용한다. 0은 면적 게이트를 끄고 기존 peak-only 판정을 쓴다.'},
   {k:'zPeak',      g:'curve', def:'Z_PEAK',        label:'Z_PEAK',      min:0,   max:1,   step:0.01, dec:2},
   {k:'zValley',    g:'curve', def:'Z_VALLEY',      label:'Z_VALLEY',    min:0,   max:1,   step:0.01, dec:2},
   {k:'zEnd',       g:'curve', def:'Z_END',         label:'Z_END',       min:0,   max:1,   step:0.01, dec:2},
@@ -1165,44 +1230,94 @@ const PARAMS = [
    hint:'1.0=선형. 크게 잡을수록 중심 바로 바깥에서 급격히 무거워지고 가장자리는 평평. 1 미만은 반대.'},
 
   /* ── mode 3 (beta) ──────────────────────────────────────────────────────────
-     클릭 곡선은 mode 0과 완전히 같게 두고 진동만 위치에 따라 바꾼다. 그래서
+     클릭 곡선은 mode 0과 완전히 같게 두고, 키 위는 진동, 틈은 위쪽 bump를 쓴다. 그래서
      "키가 안 눌린다"(mode 2)도 "눌렸는지 흐려진다"(mode 1)도 생기지 않는다. */
   {k:'vibWhen',    g:'vib', def:'VIB_WHEN',   label:'VIB_WHEN', type:'seg', dec:0, modes:[3],
-   opts:[{v:0, label:'누를 때'}, {v:1, label:'뗄 때'}, {v:2, label:'누를 때+뗄 때'}],
-   hint:'세 값 모두 그 순간 VIB_DUR 길이의 버스트 한 번씩이다. 누르고 있는 동안 계속 울리는 지속음은 없다 — 몇 백 ms면 수용기가 적응해 세기 단서가 사라지고, 겹쳐 눌린 두 키의 진동이 섞인다.'},
+   opts:[{v:0, label:'누를 때'}, {v:1, label:'뗄 때'}, {v:2, label:'누를 때+뗄 때'}, {v:3, label:'상시'}],
+   hint:'앞의 셋은 키캡 위에서 그 순간 VIB_DUR 길이의 버스트 한 번씩이고, 누르고 있는 동안은 조용하다. 상시는 손가락 움직임을 따라 진동한다.'},
+  {k:'vibSpeedMode', g:'vib', def:'VIB_SPEED_MODE', label:'이동 속도 곱하기', type:'toggle', dec:0, modes:[3],
+   offLabel:'꺼짐 · 위치만', onLabel:'켜짐 · 위치 × 이동 속도',
+   hint:'VIB_WHEN은 바꾸지 않고 진동 세기에만 속도 배율을 곱한다. Sensel에 z 좌표가 없으므로, 평면 x/y 속도와 프레임 간 힘 변화로 추정한 누름/떨 속도 중 더 큰 쪽을 쓴다.'},
+  {k:'vibSpeedFloor', g:'vib', def:'VIB_SPEED_FLOOR', label:'VIB_SPEED_FLOOR', min:0, max:300, step:5, dec:0, modes:[3], speedMode:1,
+   nmin:0, nmax:1000,
+   hint:'정지 상태에도 남겨두는 최소 속도 배율. 100 = 위치 세기의 10%. <b>VIB_WHEN=상시일 때 손을 올려놓은 상태의 미세 진동</b>을 이 값으로 조절한다.'},
+  {k:'vibPressFull', g:'vib', def:'VIB_PRESS_FULL', label:'VIB_PRESS_FULL', min:1, max:200, step:1, dec:0, modes:[3], speedMode:1,
+   nmin:1, nmax:2000,
+   hint:'한 센서 프레임의 힘 변화가 이 값이면 누름/떨 속도 배율 1. <b>낮출수록 약하게 친 타건에도 진동이 쉽게 커진다.</b>'},
+  {k:'gapBump',    g:'vib', def:'GAP_BUMP', label:'GAP_BUMP', type:'seg', dec:0, modes:[3],
+   opts:[{v:0, label:'꺼짐 · 틈 진동'}, {v:1, label:'켜짐 · bump'}],
+   hint:'꺼지면 VIB_WHEN=상시일 때 기존 VIB_GAP/VIB_GAP_FREQ_HZ로 틈이 울린다. 켜면 틈 진동을 끄고 아래의 BUMP_MODE 방식만 쓴다.'},
+  {k:'gapBumpMode', g:'vib', def:'GAP_BUMP_MODE', label:'BUMP_MODE', type:'seg', dec:0, modes:[3], gapMode:1,
+   opts:[{v:0, label:'단발 bump'}, {v:1, label:'힘 비례 변위'}],
+   hint:'단발은 누를 때 위쪽 bump 한 번. 힘 비례 변위는 누르는 동안 힘에 비례해 위쪽으로 계속 변위된다.'},
   {k:'vibCenter',  g:'vib', def:'VIB_CENTER', label:'VIB_CENTER', min:0, max:1000, step:1, dec:0, modes:[3],
-   hint:'키 중심에서의 진동 세기. 1000 = 듀티 1.0. 0이면 똑바로 쳤을 때 조용하다.'},
+   hint:'<b>데드밴드 끝점</b>에서의 진동 세기 (키 중심이 아니다). 1000 = 듀티 1.0. 데드밴드 안쪽은 값과 무관하게 무음이라, 경계에서 0 → CENTER 로 뛰는 계단이 손끝에 문턱으로 잡힌다. DEADBAND 가 0이면(기본값) 조용한 구역이 없어 이 계단도 없다 — 스위트스팟을 만들려면 DEADBAND 를 먼저 올릴 것.'},
   {k:'vibEdge',    g:'vib', def:'VIB_EDGE',   label:'VIB_EDGE',   min:0, max:1000, step:1, dec:0, modes:[3],
    hint:'키캡 경계에서의 진동 세기. CENTER보다 작게 넣으면 반대로 중심에서만 울린다.'},
+  {k:'vibGap',     g:'vib', def:'VIB_GAP', label:'VIB_GAP', min:0, max:1000, step:1, dec:0, modes:[3], gapMode:0,
+   hint:'틈 피드백=진동일 때 틈의 진동 세기.'},
   {k:'vibCurve',   g:'vib', def:'VIB_CURVE',  label:'VIB_CURVE',  min:0.3, max:4, step:0.05, dec:2, f:true, modes:[3],
    nmin:0.01, nmax:100,
    hint:'1.0=선형. 크게 잡을수록 중심 바로 바깥에서 급격히 세지고 가장자리는 평평. 1 미만은 반대.'},
   {k:'vibFreq',    g:'vib', def:'VIB_FREQ_HZ', label:'VIB_FREQ_HZ', min:10, max:500, step:1, dec:0, modes:[3],
-   hint:'220 근처 권장. 누르는 중엔 손가락 임피던스가 높아 변위가 잘 안 나므로, 변위가 아니라 힘으로 느끼는 파치니 대역(150~300Hz)을 써야 한다. 이 바가 그 대역까지 따라오는지는 "계속 울리기"를 켜놓고 이 슬라이더를 훑어 확인할 수 있다.'},
-  {k:'vibDur',     g:'vib', def:'VIB_DUR_MS',   label:'VIB_DUR_MS',   min:5, max:500, step:1, dec:0, modes:[3],
-   hint:'버스트 길이(ms). 세 VIB_WHEN 모두에 적용된다.'},
-  {k:'vibDelay',   g:'vib', def:'VIB_DELAY_MS', label:'VIB_DELAY_MS', min:0, max:300, step:1, dec:0, modes:[3],
-   hint:'버클링 후 발사까지 기다리는 시간(ms). 클릭 트랜지언트의 순방향 마스킹이 20~50ms 가므로 0이면 진동이 클릭에 묻힌다. 뗄 때는 경쟁 트랜지언트가 없어 0도 된다.'},
+   hint:'키캡 위의 진동 주파수. 버스트와 진동 테스트도 이 값을 쓴다. 220Hz 근처 권장.'},
+  {k:'vibGapFreq', g:'vib', def:'VIB_GAP_FREQ_HZ', label:'VIB_GAP_FREQ_HZ', min:10, max:500, step:1, dec:0, modes:[3], gapMode:0,
+   hint:'틈 피드백=진동일 때 틈에 쓰는 주파수.'},
+  {k:'vibDur',     g:'vib', def:'VIB_DUR_MS',   label:'VIB_DUR_MS',   min:5, max:5000, step:5, dec:0, modes:[3], vibWhens:[0,1,2,3],
+   nmin:5, nmax:10000,
+   hint:'누를 때/뗄 때 모드에서는 버스트 길이(ms). <b>상시에서는 모든 손가락의 마지막 움직임 이후 진동을 유지하는 시간</b>이다. 어느 손가락이든 다시 움직이면 즉시 진동이 재개되고 타이머가 다시 시작된다.'},
+  {k:'vibMove',    g:'vib', def:'VIB_MOVE_MM',  label:'VIB_MOVE_MM',  min:0.1, max:10, step:0.1, dec:1, f:true, modes:[3], vibWhens:[3],
+   nmin:0.1, nmax:20,
+   hint:'<b>상시 진동의 정지 타이머를 다시 시작할 최소 이동 거리(mm)</b>. 키 모서리→틈→옆 모서리는 약 2.1mm라 0.5~1.0mm 권장. 너무 작으면 좌표 잡음도 움직임으로 세어 진동이 안 꺼질 수 있다.'},
+  {k:'vibDelay',   g:'vib', def:'VIB_DELAY_MS', label:'VIB_DELAY_MS', min:0, max:300, step:1, dec:0, modes:[3], vibWhens:[0,1,2],
+   hint:'버클링 후 발사까지 기다리는 시간(ms). 클릭 트랜지언트의 순방향 마스킹이 20~50ms 가므로 0이면 진동이 클릭에 묻힌다. 뗄 때는 경쟁 트랜지언트가 없어 0도 된다. <b>상시에서는 무시된다</b>(발사 순간이라는 게 없으므로).'},
 
+  {k:'vibSpeedMin', g:'vib', def:'VIB_SPEED_MIN_MM_S', label:'VIB_SPEED_MIN_MM_S', min:0, max:300, step:5, dec:0, modes:[3], speedMode:1,
+   nmin:0, nmax:2000,
+   hint:'평면 x/y 이동이 이 속도(mm/s) 이하면 속도 배율 0으로 본다. 손가락 미세 떨림과 좌표 잡음을 걸러낸다.'},
+  {k:'vibSpeedMax', g:'vib', def:'VIB_SPEED_MAX_MM_S', label:'VIB_SPEED_MAX_MM_S', min:50, max:1500, step:10, dec:0, modes:[3], speedMode:1,
+   nmin:1, nmax:5000,
+   hint:'평면 x/y 이동이 이 속도(mm/s)에서 배율 1이 된다. 빠른 내려치기/떼기는 힘 변화량÷F_PEAK로 별도 추정해, 두 배율 중 더 큰 값을 위치 세기에 곱한다.'},
+
+  {k:'gapBumpAmp', g:'vib', def:'GAP_BUMP_AMP', label:'GAP_BUMP_AMP', min:0, max:1000, step:1, dec:0, modes:[3], gapMode:1,
+   hint:'단발 bump의 크기이자 힘 비례 변위의 최대 위쪽 구동. 1000 = 듀티 1.0. 보통 클릭과 반대 방향이다.'},
+  {k:'gapBumpForce', g:'vib', def:'GAP_BUMP_FORCE', label:'GAP_BUMP_FORCE', min:1, max:100, step:1, dec:0, modes:[3], gapMode:1, bumpMode:0,
+   nmin:1, nmax:2000,
+   hint:'틈 접촉을 누름으로 인식할 최소 힘. <b>기본 1은 접촉이 잡히는 첫 프레임에 즉시 bump</b>를 내며 버클링 시점을 기다리지 않는다. 누른 채로는 반복하지 않는다.'},
+  {k:'gapBumpDur', g:'vib', def:'GAP_BUMP_DUR_MS', label:'GAP_BUMP_DUR_MS', min:5, max:150, step:1, dec:0, modes:[3], gapMode:1, bumpMode:0,
+   nmin:5, nmax:300,
+   hint:'0 → 위 → 0으로 움직이는 단일 bump의 길이(ms). 짧을수록 딱 끊어지고, 길수록 둥근 돌출감이 난다.'},
+  {k:'gapDisplaceForce', g:'vib', def:'GAP_DISPLACE_FORCE', label:'GAP_DISPLACE_FORCE', min:10, max:600, step:5, dec:0, modes:[3], gapMode:1, bumpMode:1,
+   nmin:1, nmax:2000,
+   hint:'힘 비례 변위가 GAP_BUMP_AMP의 최대치에 도달하는 힘. 예: 300이면 힘 150에서 최대 변위의 50%.'},
+
+  {k:'missMin',    g:'sys', def:'MISS_MIN',   label:'MISS_MIN',    min:0, max:300, step:5, dec:0, f:true,
+   nmin:0, nmax:2000,
+   hint:'이 힘 이상 줬는데 버클링을 못 한 누름을 <b>#miss</b> 로 기록한다 (misses.csv). 갭을 눌렀거나, 키캡 위인데 그 자리 임계에 못 미친 경우 — 어느 쪽도 글자가 안 나오므로 지금까지는 로그에 흔적이 없었다.<br>0 = 끔. 너무 낮추면 손을 얹어만 둔 손가락까지 잡히고, 너무 높이면 살살 친 미인식 타건을 놓친다.'},
   {k:'calOX',      g:'sys', def:'CAL_OX',      label:'CAL_OX',      min:-60, max:60, step:0.1, dec:1, f:true, hint:'센서 원점 보정 X (mm). 오버레이가 밀렸을 때'},
   {k:'calOY',      g:'sys', def:'CAL_OY',      label:'CAL_OY',      min:-60, max:60, step:0.1, dec:1, f:true},
 ];
 
 /* 세 조건의 기본값. 펌웨어 applyDefaults()와 같은 표를 UI에도 둔다 —
    기기 없이도 곡선을 미리 볼 수 있어야 하기 때문이다. 곡선은 세 조건이 공유하고
-   mode 는 그걸 위치에 따라 어떻게 비틀지만 정한다 (mode 0은 안 비튼다). */
+   mode 는 그걸 위치에 따라 어떻게 비틀지만 정한다 (mode 0은 안 비튼다).
+   2026-08-26 force-8 실험의 설정 스냅샷을 기본으로 고정했다. */
 function defaultsFor(mode){
   return {
     mode: mode,
-    fPeak:100, fValley:70, fEnd:90,
+    fPeak:90, fValley:50, fEnd:70,
+    peakEnable:1, peakThreshold:7, peakMinTotal:20, peakAreaMax:115,
     zPeak:0.50, zValley:0.80, zEnd:1.00,
-    deadband: 0.0,
-    fEdgeScale:3.0, fEdgeCurve:1.0,
-    gainMin:0.1, ampCurve:2.0,
+    deadband:0.47,
+    fEdgeScale:5.0, fEdgeCurve:1.0,
+    gainMin:0.3, ampCurve:2.0,
     // mode 3. 중심 0 = 똑바로 치면 조용하고 빗겨 칠수록 울린다 (교정 피드백 방향)
-    vibWhen:0, vibCenter:0, vibEdge:400, vibCurve:1.0,
-    vibFreq:220, vibDur:60, vibDelay:50,
+    vibWhen:0, gapBump:1, gapBumpMode:0, vibCenter:0, vibEdge:400, vibGap:50, vibCurve:1.0,
+    vibFreq:200, vibGapFreq:120, vibDur:50, vibMove:5.0, vibDelay:0,
+    vibSpeedMode:0, vibSpeedFloor:100, vibPressFull:20, vibSpeedMin:20, vibSpeedMax:500,
+    gapBumpAmp:400, gapBumpForce:1, gapBumpDur:35, gapDisplaceForce:300,
     calOX:-18.8, calOY:23.0,
+    missMin:30,
     hid:1,
   };
 }
@@ -1210,8 +1325,19 @@ function defaultsFor(mode){
 /* 저장된 값의 mode 번호를 지금 체계로 맞춘다.
    schema 2: position/force/combined 가 1/2/3으로 밀리고 0이 "햅틱 없음"이 됐다.
    schema 3: 0의 뜻이 "동일 햅틱"으로 바뀌고 combined(3)가 사라졌다. 3은 갈 곳이
-             없으므로 0으로 되돌린다 — 없는 조건을 계속 들고 있는 것보다 낫다. */
-const TUNE_SCHEMA = 3;
+             없으므로 0으로 되돌린다 — 없는 조건을 계속 들고 있는 것보다 낫다.
+   schema 4: 상시 모드의 vibDur가 정지 타이머가 되어 기존 상시 설정을 2000ms로 옮긴다.
+   schema 5: 고정 5mm였던 움직임 문턱을 vibMove 튜너블로 옮긴다.
+   schema 6: 틈의 상시 진동을 위쪽 단발 bump로 바꾸고 gapBump* 값을 추가한다.
+   schema 7: 기존 틈 진동과 bump를 고르는 gapBump 토글을 추가한다.
+   schema 8: gap bump를 버클링 힘이 아닌 첫 접촉에 발사하도록 문턱을 낮춘다.
+   schema 9: 힘 비례 상시 위쪽 변위와 gapDisplaceForce를 추가한다.
+   schema 10: 위치 × 이동 속도 진동 모드와 속도 범위를 추가한다.
+   schema 11: 이동 속도를 VIB_WHEN에서 독립 토글로 분리한다.
+   schema 12: 정지 미세 진동과 약한 타건 감도 조절값을 추가한다.
+   schema 13: total/peak 하이브리드 키다운 설정을 추가한다.
+   schema 14: 실측 손톱/피부 분리용 peakAreaMax를 추가한다. */
+const TUNE_SCHEMA = 14;
 (function migrateStored(){
   try {
     if (+(localStorage.getItem('vcmTuneSchema') || 1) >= TUNE_SCHEMA) return;
@@ -1219,7 +1345,48 @@ const TUNE_SCHEMA = 3;
     const bump = o => {
       if (o && typeof o === 'object' && typeof o.mode === 'number') {
         if (was < 2) o.mode = Math.min(3, o.mode + 1);
-        if (o.mode > 2) o.mode = 0;
+        if (was < 3 && o.mode > 2) o.mode = 0;
+        // schema 4부터 상시 모드의 vibDur는 무시값이 아니라 정지 타이머다.
+        // 기존 상시 설정만 2초로 옮기고 버스트 프리셋의 짧은 길이는 보존한다.
+        if (was < 4 && o.mode === 3 && o.vibWhen === 3) o.vibDur = 2000;
+        if (was < 5) o.vibMove = 5.0;
+        if (was < 6) {
+          o.gapBumpAmp = 400;
+          o.gapBumpForce = 90;
+          o.gapBumpDur = 35;
+          delete o.vibGap;
+          delete o.vibGapFreq;
+        }
+        if (was < 7) {
+          o.gapBump = 1;
+          o.vibGap = 50;
+          o.vibGapFreq = 120;
+        }
+        if (was < 8) o.gapBumpForce = 1;
+        if (was < 9) {
+          o.gapBumpMode = 0;
+          o.gapDisplaceForce = 300;
+        }
+        if (was < 10) {
+          o.vibSpeedMin = 20;
+          o.vibSpeedMax = 500;
+        }
+        if (was < 11) {
+          // schema 10의 vibWhen=4는 현재 펌웨어에서 3(상시)으로 잘린다.
+          // 속도 설정은 토글로 옮기고 VIB_WHEN은 안전한 누를 때로 되돌린다.
+          o.vibSpeedMode = o.vibWhen === 4 ? 1 : 0;
+          if (o.vibWhen === 4) o.vibWhen = 0;
+        }
+        if (was < 12) {
+          o.vibSpeedFloor = 100;
+          o.vibPressFull = 20;
+        }
+        if (was < 13) {
+          o.peakEnable = 1;
+          o.peakThreshold = 7;
+          o.peakMinTotal = 20;
+        }
+        if (was < 14) o.peakAreaMax = 115;
       }
       return o;
     };
@@ -1234,7 +1401,7 @@ const TUNE_SCHEMA = 3;
   } catch(e) {}
 })();
 
-let V = defaultsFor(0);
+let V = defaultsFor(2);
 try {
   const last = JSON.parse(localStorage.getItem('vcmTuneLast') || 'null');
   if (last && typeof last === 'object') V = Object.assign(V, last);
@@ -1259,6 +1426,7 @@ function buildModes(){
 
 function buildParams(){
   PARAMS.forEach(p => {
+    if (p.type === 'toggle') { buildToggle(p); return; }
     // 값이 몇 개 안 되는 "고르는" 파라미터는 슬라이더가 아니라 버튼으로 낸다.
     // 0/1/2를 슬라이더로 끄는 건 무엇을 고른 건지 손으로도 눈으로도 안 보인다.
     if (p.type === 'seg') { buildSeg(p); return; }
@@ -1318,8 +1486,32 @@ function buildSeg(p){
   rows.set(p.k, {wrap, seg: btns, p});
 }
 
+function buildToggle(p){
+  const wrap = document.createElement('div');
+  wrap.className = 'prow';
+  wrap.innerHTML =
+    `<div class="plab"><span class="pn">${p.label}</span></div>` +
+    `<div class="pseg"><button type="button"></button></div>` +
+    (p.hint ? `<div class="phint">${p.hint}</div>` : '');
+  $('g-' + p.g).appendChild(wrap);
+
+  const button = wrap.querySelector('button');
+  button.onclick = () => {
+    touched.set(p.k, performance.now());
+    apply(p.k, V[p.k] ? 0 : 1, true);
+  };
+  rows.set(p.k, {wrap, toggle:button, p});
+}
+
 // 값 하나를 상태에 반영한다. send=true면 기기로도 내보낸다.
 function apply(k, v, send){
+  if (k === 'vibWhen') {
+    const old = V.vibWhen;
+    if (old !== 3 && v === 3 && V.vibDur === 50) V.vibDur = 2000;
+    if (old === 3 && v !== 3 && V.vibDur === 2000) V.vibDur = 50;
+    syncRow('vibDur');
+    if (send) queueSend('vibDur', V.vibDur);
+  }
   V[k] = v;
   syncRow(k);
   refresh();
@@ -1333,6 +1525,12 @@ function syncRow(k){
   if (!r) return;
   const v = V[k];
   if (r.seg) { r.seg.forEach(b => b.classList.toggle('on', +b.dataset.v === +v)); return; }
+  if (r.toggle) {
+    r.toggle.classList.toggle('on', !!v);
+    r.toggle.textContent = v ? r.p.onLabel : r.p.offLabel;
+    r.toggle.setAttribute('aria-pressed', v ? 'true' : 'false');
+    return;
+  }
   if (r.cb) { r.cb.checked = !!v; return; }
   const s = r.p.dec != null ? Number(v).toFixed(r.p.dec) : String(v);
   if (document.activeElement !== r.num) r.num.value = s;
@@ -1350,7 +1548,15 @@ function setMode(m, silent){
   MODES.forEach(x => x.el.classList.toggle('sel', x.v === m));
   PARAMS.forEach(p => {
     const r = rows.get(p.k);
-    if (r && r.wrap) r.wrap.classList.toggle('off', !!p.modes && !p.modes.includes(m));
+    if (r && r.wrap) {
+      const modeOff = !!p.modes && !p.modes.includes(m);
+      const gapOff = p.gapMode != null &&
+        (Array.isArray(p.gapMode) ? !p.gapMode.includes(+V.gapBump) : +V.gapBump !== p.gapMode);
+      const bumpOff = p.bumpMode != null && +V.gapBumpMode !== p.bumpMode;
+      const vibWhenOff = !!p.vibWhens && !p.vibWhens.includes(+V.vibWhen);
+      const speedOff = p.speedMode != null && +V.vibSpeedMode !== p.speedMode;
+      r.wrap.classList.toggle('off', modeOff || gapOff || bumpOff || vibWhenOff || speedOff);
+    }
   });
   refresh();
   if (!silent) queueSend('mode', m);
@@ -1362,7 +1568,15 @@ function refresh(){
   MODES.forEach(x => x.el.classList.toggle('sel', x.v === V.mode));
   PARAMS.forEach(p => {
     const r = rows.get(p.k);
-    if (r && r.wrap) r.wrap.classList.toggle('off', !!p.modes && !p.modes.includes(V.mode));
+    if (r && r.wrap) {
+      const modeOff = !!p.modes && !p.modes.includes(V.mode);
+      const gapOff = p.gapMode != null &&
+        (Array.isArray(p.gapMode) ? !p.gapMode.includes(+V.gapBump) : +V.gapBump !== p.gapMode);
+      const bumpOff = p.bumpMode != null && +V.gapBumpMode !== p.bumpMode;
+      const vibWhenOff = !!p.vibWhens && !p.vibWhens.includes(+V.vibWhen);
+      const speedOff = p.speedMode != null && +V.vibSpeedMode !== p.speedMode;
+      r.wrap.classList.toggle('off', modeOff || gapOff || bumpOff || vibWhenOff || speedOff);
+    }
   });
   buildSnippet();
 }
@@ -1523,7 +1737,25 @@ function handleLine(line){
   if (line.startsWith('#rel ')) {
     const kv = kvPairs(line.slice(5));
     dispatchEvent(new CustomEvent('vcm-release', {detail:{
-      key:kv.key, fmax:parseFloat(kv.fmax), th:parseFloat(kv.th),
+      key:kv.key, fmax:parseFloat(kv.fmax), pfmax:parseFloat(kv.pfmax), th:parseFloat(kv.th),
+    }}));
+    logLine(line);
+    return;
+  }
+  // #miss = 버클링에 못 닿고 끝난 누름. 글자가 안 나온 타건이라 #probe 와 짝이
+  // 되지 않는다 — 별도 스트림으로 흘려 misses.csv 로만 간다.
+  if (line.startsWith('#miss ')) {
+    const kv = kvPairs(line.slice(6));
+    dispatchEvent(new CustomEvent('vcm-miss', {detail:{
+      key:kv.key, why:kv.why || '',
+      edge:parseFloat(kv.edge), mm:parseFloat(kv.mm),
+      dx:parseFloat(kv.dx), dy:parseFloat(kv.dy),
+      px:parseFloat(kv.px), py:parseFloat(kv.py),
+      th:parseFloat(kv.th), f:parseFloat(kv.f),
+      af:kv.af === undefined ? '' : parseFloat(kv.af), x:parseFloat(kv.x),
+      pth:parseFloat(kv.pth), pf:parseFloat(kv.pf),
+      pr:parseFloat(kv.pr), conc:parseFloat(kv.conc),
+      area:parseFloat(kv.area), dens:parseFloat(kv.dens),
     }}));
     logLine(line);
     return;
@@ -1534,7 +1766,13 @@ function handleLine(line){
     const kv = kvPairs(line.slice(7));
     dispatchEvent(new CustomEvent('vcm-press', {detail:{
       key:kv.key, edge:parseFloat(kv.edge), mm:parseFloat(kv.mm), eff:parseFloat(kv.eff),
-      th:parseFloat(kv.th), gain:parseFloat(kv.gain), f:parseFloat(kv.f),
+      // 펌웨어가 아직 dx/dy 를 안 뱉으면 NaN 이 로그에 박힌다. 빈 칸으로 남긴다.
+      dx: kv.dx === undefined ? '' : parseFloat(kv.dx),
+      dy: kv.dy === undefined ? '' : parseFloat(kv.dy),
+      th:parseFloat(kv.th), f:parseFloat(kv.f), x:parseFloat(kv.x),
+      pth:parseFloat(kv.pth), pf:parseFloat(kv.pf), pr:parseFloat(kv.pr), src:kv.src || '',
+      area:parseFloat(kv.area), dens:parseFloat(kv.dens), conc:parseFloat(kv.conc),
+      gain:parseFloat(kv.gain),
     }}));
     logLine(line);
     return;
@@ -1543,7 +1781,7 @@ function handleLine(line){
 }
 
 /* ── 라이브 텔레메트리 ────────────────────────────────────────────────────────
-   "#tel l=<keyIdx>,<edge>,<force>,<peak>,<gain> r=... dl= dr= n= drop="
+   "#tel l=<keyIdx>,<edge>,<total>,<totalTh>,<gain>,<vib>,<peak>,<peakTh>,<peakHit>,<area> ..."
    keyIdx는 keymap.h의 KEYS[] 인덱스인데, 이 파일 위쪽 mapped[]가 같은 순서라
    그대로 event.code로 바꿔 키보드 그림에 표시할 수 있다. */
 let telLit = [null, null];
@@ -1551,19 +1789,30 @@ let telLit = [null, null];
 function telSide(tag, s, ids){
   const p = (s || '').split(',');
   const ki = parseInt(p[0], 10), edge = parseFloat(p[1]), f = parseFloat(p[2]), th = parseFloat(p[3]);
+  const pf = parseFloat(p[6]), pth = parseFloat(p[7]), peakHit = parseInt(p[8], 10) === 1;
+  const area = parseFloat(p[9]);
+  const active = isFinite(f) && f > 0;
   // p[5] = 지금 이 접촉 위치에서 나갈 진동 진폭(듀티). 실제로 울리고 있는지가
   // 아니라 "지금 누르면 이만큼"이다 — 슬라이더를 끌면서 위치별 세기를 볼 수 있다.
   const vib = parseFloat(p[5]);
-  $(ids.vib).innerHTML = (isFinite(vib) && ki >= 0 && V.mode === 3)
+  $(ids.vib).innerHTML = (isFinite(vib) && active && V.mode === 3)
     ? Math.round(vib * 1000) + '<small> / 1000</small>' : '–';
-  const name = (ki >= 0 && ki < mapped.length) ? mapped[ki][0] : (ki >= 0 ? '#' + ki : '–');
+  const name = (ki >= 0 && ki < mapped.length) ? mapped[ki][0]
+             : (ki >= 0 ? '#' + ki : (active ? '틈' : '–'));
   $(ids.key).textContent = name;
   $(ids.f).innerHTML = isFinite(f)
-    ? Math.round(f) + '<small> / ' + Math.round(th) + '</small>' : '–';
-  $(ids.e).innerHTML = (isFinite(edge) && ki >= 0)
-    ? (edge * KEY_HALF_MM).toFixed(1) + '<small> mm</small>' : '–';
-  $(ids.bar).style.width = Math.max(0, Math.min(100, (f / th) * 100)) + '%';
-  $(ids.bar).style.background = f >= th ? 'var(--ok)' : 'var(--accent)';
+    ? Math.round(f) + '<small> / ' + Math.round(th) + ' total</small>' +
+      (isFinite(pf) && V.peakEnable
+        ? ' · ' + Math.round(pf) + '<small> / ' + Math.round(pth) + ' peak</small>' : '')
+    : '–';
+  $(ids.e).innerHTML = (isFinite(edge) && active)
+    ? (ki >= 0 ? (edge * KEY_HALF_MM).toFixed(1) + '<small> mm</small>' : '틈') : '–';
+  const totalRatio = th > 0 ? f / th : 0;
+  const areaOK = !V.peakAreaMax || (isFinite(area) && area > 0 && area <= V.peakAreaMax);
+  const peakRatio = V.peakEnable && areaOK && f >= V.peakMinTotal && pth > 0 ? pf / pth : 0;
+  const triggerRatio = Math.max(totalRatio, peakRatio);
+  $(ids.bar).style.width = Math.max(0, Math.min(100, triggerRatio * 100)) + '%';
+  $(ids.bar).style.background = f >= th || peakHit ? 'var(--ok)' : 'var(--accent)';
 
   const code = (ki >= 0 && ki < mapped.length) ? mapped[ki][1] : null;
   const slot = tag === 'l' ? 0 : 1;
@@ -1594,7 +1843,8 @@ function logLine(line, isTel){
   d.className = line.startsWith('#cfg') ? 'lcfg'
               : line.startsWith('#ok')  ? 'lok'
               : line.startsWith('#err') ? 'lerr'
-              : line.startsWith('#probe') || line.startsWith('#rel') ? 'lprobe' : 'ltx';
+              : line.startsWith('#probe') || line.startsWith('#rel')
+                || line.startsWith('#miss') ? 'lprobe' : 'ltx';
   d.textContent = line;
   const atBottom = logEl2.scrollTop + logEl2.clientHeight >= logEl2.scrollHeight - 24;
   logEl2.appendChild(d);
@@ -1631,15 +1881,17 @@ document.addEventListener('keydown', e => {
    스케치에 실제로 존재하는 상수만 뽑는다. */
 const SNIP = {
   // mode 0은 위치 의존 상수가 없다. 곡선만 다른 조건과 맞추면 된다.
-  0: ['F_PEAK','F_VALLEY','F_END','Z_PEAK','Z_VALLEY','Z_END'],
+  0: ['F_PEAK','F_VALLEY','F_END','PEAK_ENABLE','PEAK_THRESHOLD','PEAK_MIN_TOTAL','PEAK_AREA_MAX','Z_PEAK','Z_VALLEY','Z_END'],
   1: ['F_PEAK','F_VALLEY','F_END','Z_PEAK','Z_VALLEY','Z_END',
-      'KEY_GAIN_MIN','AMP_CURVE','EDGE_DEADBAND'],
+      'PEAK_ENABLE','PEAK_THRESHOLD','PEAK_MIN_TOTAL','PEAK_AREA_MAX','KEY_GAIN_MIN','AMP_CURVE','EDGE_DEADBAND'],
   2: ['F_PEAK','F_VALLEY','F_END','Z_PEAK','Z_VALLEY','Z_END',
-      'EDGE_DEADBAND','F_EDGE_SCALE','F_EDGE_CURVE'],
-  // mode 3은 클릭 곡선이 mode 0과 같고 위치는 진동으로만 나간다.
-  3: ['F_PEAK','F_VALLEY','F_END','Z_PEAK','Z_VALLEY','Z_END',
-      'EDGE_DEADBAND','VIB_WHEN','VIB_CENTER','VIB_EDGE','VIB_CURVE',
-      'VIB_FREQ_HZ','VIB_DUR_MS','VIB_DELAY_MS'],
+      'PEAK_ENABLE','PEAK_THRESHOLD','PEAK_MIN_TOTAL','PEAK_AREA_MAX','EDGE_DEADBAND','F_EDGE_SCALE','F_EDGE_CURVE'],
+  // mode 3은 클릭 곡선이 mode 0과 같고, 틈 피드백은 토글로 고른다.
+  3: ['F_PEAK','F_VALLEY','F_END','PEAK_ENABLE','PEAK_THRESHOLD','PEAK_MIN_TOTAL','PEAK_AREA_MAX','Z_PEAK','Z_VALLEY','Z_END',
+      'EDGE_DEADBAND','VIB_WHEN','GAP_BUMP','GAP_BUMP_MODE','VIB_CENTER','VIB_EDGE','VIB_GAP','VIB_CURVE',
+      'VIB_FREQ_HZ','VIB_GAP_FREQ_HZ','VIB_DUR_MS','VIB_MOVE_MM','VIB_DELAY_MS',
+      'VIB_SPEED_MODE','VIB_SPEED_FLOOR','VIB_PRESS_FULL','VIB_SPEED_MIN_MM_S','VIB_SPEED_MAX_MM_S',
+      'GAP_BUMP_AMP','GAP_BUMP_FORCE','GAP_BUMP_DUR_MS','GAP_DISPLACE_FORCE'],
 };
 
 function snippetText(){
@@ -1657,8 +1909,8 @@ function snippetText(){
     ? '// 동일 햅틱(mode 0) — 위치 의존 상수 없이 곡선만'
     : V.mode === 3
     // beta는 아직 단독 스케치가 없다. 확정된 조건을 그대로 적어두는 기록용이다.
-    ? '// beta(mode 3) — 클릭은 mode 0과 동일, 위치는 진동으로만.\n' +
-      '// VIB_WHEN 0=누를 때 1=뗄 때 2=누를 때+뗄 때'
+    ? '// beta(mode 3) — GAP_BUMP 0=틈 진동, 1=bump. GAP_BUMP_MODE 0=단발, 1=힘 비례 변위.\n' +
+      '// VIB_WHEN 0=누를 때 1=뗄 때 2=누를 때+뗄 때 3=상시. VIB_SPEED_MODE 1=위치×이동 속도'
     : '// ' + MODES[V.mode].name + '.ino 에 옮겨 적을 값';
   return head + '\n' + lines.join('\n');
 }
@@ -1712,6 +1964,9 @@ $('t-clear').onclick  = () => { logEl2.textContent = ''; };
 let vibHolding = false;
 $('t-vibtest').onclick = () => {
   write('vib ' + Math.max(1, V.vibEdge || 400) + ' ' + V.vibDur);
+};
+$('t-bumptest').onclick = () => {
+  write('bump ' + Math.max(1, V.gapBumpAmp || 400) + ' ' + V.gapBumpDur);
 };
 $('t-vibhold').onclick = () => {
   vibHolding = !vibHolding;
