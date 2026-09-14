@@ -287,6 +287,9 @@
   <div class="trow">
     <button id="t-connect">기기 연결</button>
     <span class="tstat" id="t-status">미연결</span>
+    <button id="t-band-connect">밴드 연결</button>
+    <span class="tstat" id="t-band-status">미연결</span>
+    <button id="t-band-invert">밴드 방향 반전: OFF</button>
     <button id="t-get">기기에서 읽기</button>
     <button id="t-push">현재 값 전부 전송</button>
     <button id="t-defaults">이 모드 기본값</button>
@@ -307,7 +310,7 @@
   <div class="tgrid">
     <div class="tcol"><h3>force displacement curve</h3><div id="g-curve"></div></div>
     <div class="tstack">
-      <div class="tcol"><h3>위치 의존</h3><div id="g-pos"></div></div>
+      <div class="tcol"><h3>위치 의존 + 버클링 방향</h3><div id="g-pos"></div></div>
       <div class="tcol"><h3>진동 + 틈 bump · beta (mode 3)</h3><div id="g-vib"></div></div>
       <div class="tcol"><h3>센서 캘리브레이션</h3><div id="g-sys"></div></div>
     </div>
@@ -1172,8 +1175,9 @@ updateLogUI();
    위 타이핑 테스트와는 전역을 공유하지 않도록 IIFE로 싸둔다 (light() / mapped 만 읽는다).
 
    프로토콜은 vcm-tune.ino 헤더 참고:
-     보내기 : set <name> <v> / get / defaults <0|1|2|3> / save / load / hid <0|1>
-     받기   : #cfg #ok #err #probe #rel #tel #hid  (기계가 읽는 줄은 전부 '#'로 시작)
+     보내기 : set <name> <v> / get / defaults <0|1|2|3|4> / save / load / hid <0|1>
+     받기   : #cfg #ok #err #probe #rel #tel #hid #band
+              (#band hand=L|R mask=1|2|4|8 를 연결된 MKR1000으로 전달)
 
    기기가 없어도 값 편집과 #define 스니펫 생성은 그대로 동작한다.
    ══════════════════════════════════════════════════════════════════════════════ */
@@ -1194,6 +1198,7 @@ const MODES = [
   {v:1, name:'vcm-position', desc:''},
   {v:2, name:'vcm-force', desc:''},
   {v:3, name:'beta-vibration', desc:'키 위는 편심 진동, 틈은 진동/bump 토글'},
+  {v:4, name:'directional-buckling', desc:'상/하 버클링 + 빠른 이동·느린 복귀 방향성 펄스'},
 ];
 
 const PARAMS = [
@@ -1232,6 +1237,21 @@ const PARAMS = [
   /* ── mode 3 (beta) ──────────────────────────────────────────────────────────
      클릭 곡선은 mode 0과 완전히 같게 두고, 키 위는 진동, 틈은 위쪽 bump를 쓴다. 그래서
      "키가 안 눌린다"(mode 2)도 "눌렸는지 흐려진다"(mode 1)도 생기지 않는다. */
+  /* mode 4: 키 상/하 위치로 버클링 방향을 고른다. */
+  {k:'directionInvert', g:'pos', def:'DIRECTION_INVERT', label:'버클링 방향', type:'toggle', dec:0, modes:[4],
+   offLabel:'위 → 위 · 아래 → 아래', onLabel:'위 → 아래 · 아래 → 위',
+   hint:'키 중심을 기준으로 버클링 방향을 고른다. 방향은 버클링 순간에 고정되어 누른 채 중심을 지나도 바뀌지 않는다.'},
+  {k:'dirPulseAmp', g:'pos', def:'DIR_PULSE_AMP', label:'방향 펄스 세기', min:0, max:600, step:5, dec:0, modes:[4],
+   nmin:0, nmax:1000,
+   hint:'버클링 직후 같은 방향으로 덧붙이는 최대 구동. 300 = 듀티 0.3.'},
+  {k:'dirPulseAttack', g:'pos', def:'DIR_PULSE_ATTACK_MS', label:'빠른 이동', min:1, max:60, step:1, dec:0, modes:[4],
+   nmin:1, nmax:100,
+   hint:'0에서 방향 펄스 최대치까지 올라가는 시간(ms). 짧을수록 방향성 충격이 또렷해진다.'},
+  {k:'dirPulseReturn', g:'pos', def:'DIR_PULSE_RETURN_MS', label:'느린 복귀', min:20, max:250, step:5, dec:0, modes:[4],
+   nmin:5, nmax:500,
+   hint:'최대치에서 중립으로 돌아오는 시간(ms). 빠른 이동보다 길게 두어야 편방향이 산다.'},
+
+  /* mode 3 파라미터 시작. */
   {k:'vibWhen',    g:'vib', def:'VIB_WHEN',   label:'VIB_WHEN', type:'seg', dec:0, modes:[3],
    opts:[{v:0, label:'누를 때'}, {v:1, label:'뗄 때'}, {v:2, label:'누를 때+뗄 때'}, {v:3, label:'상시'}],
    hint:'앞의 셋은 키캡 위에서 그 순간 VIB_DUR 길이의 버스트 한 번씩이고, 누르고 있는 동안은 조용하다. 상시는 손가락 움직임을 따라 진동한다.'},
@@ -1307,6 +1327,8 @@ function defaultsFor(mode){
     mode: mode,
     fPeak:90, fValley:50, fEnd:70,
     peakEnable:1, peakThreshold:7, peakMinTotal:20, peakAreaMax:115,
+    directionInvert:0,
+    dirPulseAmp:300, dirPulseAttack:15, dirPulseReturn:80,
     zPeak:0.50, zValley:0.80, zEnd:1.00,
     deadband:0.47,
     fEdgeScale:5.0, fEdgeCurve:1.0,
@@ -1336,8 +1358,10 @@ function defaultsFor(mode){
    schema 11: 이동 속도를 VIB_WHEN에서 독립 토글로 분리한다.
    schema 12: 정지 미세 진동과 약한 타건 감도 조절값을 추가한다.
    schema 13: total/peak 하이브리드 키다운 설정을 추가한다.
-   schema 14: 실측 손톱/피부 분리용 peakAreaMax를 추가한다. */
-const TUNE_SCHEMA = 14;
+   schema 14: 실측 손톱/피부 분리용 peakAreaMax를 추가한다.
+   schema 15: 상/하 버클링 방향 반전 토글을 추가한다.
+   schema 16: mode 4의 빠른 이동·느린 복귀 방향성 펄스를 추가한다. */
+const TUNE_SCHEMA = 16;
 (function migrateStored(){
   try {
     if (+(localStorage.getItem('vcmTuneSchema') || 1) >= TUNE_SCHEMA) return;
@@ -1387,6 +1411,12 @@ const TUNE_SCHEMA = 14;
           o.peakMinTotal = 20;
         }
         if (was < 14) o.peakAreaMax = 115;
+        if (was < 15) o.directionInvert = 0;
+        if (was < 16) {
+          o.dirPulseAmp = 300;
+          o.dirPulseAttack = 15;
+          o.dirPulseReturn = 80;
+        }
       }
       return o;
     };
@@ -1588,12 +1618,35 @@ function saveLast(){
 /* ── Web Serial ───────────────────────────────────────────────────────────────*/
 let port = null, writer = null, reader = null, rxBuf = '';
 let keepReading = false, readDone = null;
+let bandPort = null, bandWriter = null, bandReader = null, bandRxBuf = '';
+let bandKeepReading = false, bandReadDone = null;
+let bandWriteChain = Promise.resolve();
+let bandDirectionInverted = localStorage.getItem('bandDirectionInverted') === '1';
 const enc = new TextEncoder();
 
 function status(txt, cls){
   const s = $('t-status');
   s.textContent = txt;
   s.className = 'tstat' + (cls ? ' ' + cls : '');
+}
+
+function bandStatus(txt, cls){
+  const s = $('t-band-status');
+  s.textContent = txt;
+  s.className = 'tstat' + (cls ? ' ' + cls : '');
+}
+
+function syncBandInvertButton(){
+  const b = $('t-band-invert');
+  b.textContent = '밴드 방향 반전: ' + (bandDirectionInverted ? 'ON' : 'OFF');
+  b.classList.toggle('on', bandDirectionInverted);
+}
+
+// Mask bits are L/U/R/D = 1/2/4/8. Swap both axes; this also works if an
+// older Teensy firmware sends a diagonal mask containing two bits.
+function invertBandMask(mask){
+  return ((mask & 1) ? 4 : 0) | ((mask & 2) ? 8 : 0) |
+         ((mask & 4) ? 1 : 0) | ((mask & 8) ? 2 : 0);
 }
 
 // 기기로 마지막에 보낸 값. 기기가 자기 범위로 잘랐는지 에코와 대조하는 데 쓴다.
@@ -1665,6 +1718,80 @@ async function disconnect(){
   $('t-connect').textContent = '기기 연결';
 }
 
+async function connectBand(){
+  if (!('serial' in navigator)) {
+    bandStatus('Web Serial 미지원', 'err');
+    return;
+  }
+  if (bandPort) { await disconnectBand(); return; }
+  try {
+    // 두 번째 선택창에서 Arduino MKR1000을 고른다.
+    bandPort = await navigator.serial.requestPort();
+    await bandPort.open({ baudRate: 115200 });
+    bandWriter = bandPort.writable.getWriter();
+    bandStatus('연결됨', 'on');
+    $('t-band-connect').textContent = '밴드 끊기';
+    bandKeepReading = true;
+    bandReadDone = bandReadLoop();
+    logLine('#ok 밴드 연결됨');
+  } catch(e) {
+    bandPort = null;
+    bandStatus('연결 실패', 'err');
+    logLine('#err band: ' + e.message);
+  }
+}
+
+async function disconnectBand(){
+  bandKeepReading = false;
+  try { if (bandReader) await bandReader.cancel(); } catch(e) {}
+  try { await bandReadDone; } catch(e) {}
+  try { if (bandWriter) bandWriter.releaseLock(); } catch(e) {}
+  try { if (bandPort) await bandPort.close(); } catch(e) {}
+  bandPort = bandWriter = bandReader = null; bandReadDone = null;
+  bandWriteChain = Promise.resolve();
+  bandStatus('미연결');
+  $('t-band-connect').textContent = '밴드 연결';
+}
+
+function writeBand(line){
+  if (!bandWriter) {
+    logLine('#err 밴드 미연결 — 안 보냄: ' + line);
+    return;
+  }
+  // 빠른 동시 타건에서도 두 명령의 바이트가 섞이지 않게 순서대로 쓴다.
+  bandWriteChain = bandWriteChain
+    .then(() => bandWriter.write(enc.encode(line + '\n')))
+    .catch(e => logLine('#err band write: ' + e.message));
+}
+
+async function bandReadLoop(){
+  const dec = new TextDecoder();
+  try {
+    while (bandPort && bandPort.readable && bandKeepReading) {
+      bandReader = bandPort.readable.getReader();
+      try {
+        for (;;) {
+          const { value, done } = await bandReader.read();
+          if (done) break;
+          bandRxBuf += dec.decode(value, { stream:true });
+          let i;
+          while ((i = bandRxBuf.indexOf('\n')) >= 0) {
+            const line = bandRxBuf.slice(0, i).replace(/\r$/, '');
+            bandRxBuf = bandRxBuf.slice(i + 1);
+            if (line) logLine('band> ' + line);
+          }
+        }
+      } finally { bandReader.releaseLock(); bandReader = null; }
+    }
+  } catch(e) {
+    bandKeepReading = false;
+    logLine('#err band read: ' + e.message);
+    bandStatus('연결 끊김', 'err');
+    $('t-band-connect').textContent = '밴드 연결';
+    bandPort = bandWriter = null;
+  }
+}
+
 async function readLoop(){
   const dec = new TextDecoder();
   try {
@@ -1723,6 +1850,20 @@ function adopt(k, raw){
 }
 
 function handleLine(line){
+  if (line.startsWith('#band ')) {
+    const kv = kvPairs(line.slice(6));
+    if ((kv.hand === 'L' || kv.hand === 'R') && /^[1248]$/.test(kv.mask || '')) {
+      const inputMask = parseInt(kv.mask, 10);
+      const outputMask = bandDirectionInverted ? invertBandMask(inputMask) : inputMask;
+      writeBand('BAND ' + kv.hand + ' ' + outputMask);
+      if (bandDirectionInverted)
+        logLine('#band-invert hand=' + kv.hand + ' mask=' + inputMask + '->' + outputMask);
+    } else {
+      logLine('#err 잘못된 band 패킷: ' + line);
+    }
+    logLine(line);
+    return;
+  }
   if (line.startsWith('#cfg ') || line.startsWith('#ok ')) {
     const body = line.slice(line.indexOf(' ') + 1);
     const kv = kvPairs(body);
@@ -1892,6 +2033,8 @@ const SNIP = {
       'VIB_FREQ_HZ','VIB_GAP_FREQ_HZ','VIB_DUR_MS','VIB_MOVE_MM','VIB_DELAY_MS',
       'VIB_SPEED_MODE','VIB_SPEED_FLOOR','VIB_PRESS_FULL','VIB_SPEED_MIN_MM_S','VIB_SPEED_MAX_MM_S',
       'GAP_BUMP_AMP','GAP_BUMP_FORCE','GAP_BUMP_DUR_MS','GAP_DISPLACE_FORCE'],
+  4: ['F_PEAK','F_VALLEY','F_END','PEAK_ENABLE','PEAK_THRESHOLD','PEAK_MIN_TOTAL','PEAK_AREA_MAX',
+      'Z_PEAK','Z_VALLEY','Z_END','DIRECTION_INVERT','DIR_PULSE_AMP','DIR_PULSE_ATTACK_MS','DIR_PULSE_RETURN_MS'],
 };
 
 function snippetText(){
@@ -1911,6 +2054,9 @@ function snippetText(){
     // beta는 아직 단독 스케치가 없다. 확정된 조건을 그대로 적어두는 기록용이다.
     ? '// beta(mode 3) — GAP_BUMP 0=틈 진동, 1=bump. GAP_BUMP_MODE 0=단발, 1=힘 비례 변위.\n' +
       '// VIB_WHEN 0=누를 때 1=뗄 때 2=누를 때+뗄 때 3=상시. VIB_SPEED_MODE 1=위치×이동 속도'
+    : V.mode === 4
+    ? '// directional-buckling(mode 4) — DIRECTION_INVERT 0=위→위/아래→아래, 1=위→아래/아래→위\n' +
+      '// 버클링 직후 DIR_PULSE_ATTACK_MS 동안 같은 방향으로 빠르게 이동하고 DIR_PULSE_RETURN_MS 동안 복귀'
     : '// ' + MODES[V.mode].name + '.ino 에 옮겨 적을 값';
   return head + '\n' + lines.join('\n');
 }
@@ -1945,6 +2091,13 @@ function pushAll(){
 }
 
 $('t-connect').onclick  = connect;
+$('t-band-connect').onclick = connectBand;
+$('t-band-invert').onclick = () => {
+  bandDirectionInverted = !bandDirectionInverted;
+  localStorage.setItem('bandDirectionInverted', bandDirectionInverted ? '1' : '0');
+  syncBandInvertButton();
+  logLine('#ok 밴드 방향 반전 ' + (bandDirectionInverted ? 'ON' : 'OFF'));
+};
 $('t-get').onclick      = () => { flushNow(); write('get'); };
 $('t-push').onclick     = () => { flushNow(); pushAll(); };
 $('t-defaults').onclick = () => {
@@ -2023,6 +2176,7 @@ buildModes();
 buildParams();
 PARAMS.forEach(p => syncRow(p.k));
 syncHidButton();
+syncBandInvertButton();
 refreshPresetList();
 setMode(V.mode, true);
 refresh();
