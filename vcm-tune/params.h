@@ -10,7 +10,7 @@
 //       "아직 없는 타입"을 참조해 컴파일이 깨진다.
 struct Params {
   uint32_t magic;
-  int   mode;            // 0 equal(위치 무관) / 1 position / 2 force / 3 beta(진동)
+  int   mode;            // 0 equal / 1 position / 2 force / 3 beta / 4 directional
   float fPeak, fValley, fEnd;
   float zPeak, zValley, zEnd;
   float clickScale;
@@ -64,6 +64,12 @@ struct Params {
   float peakMinTotal;    // 단일 sensel 노이즈 차단용 최소 total_force(gf).
   // VCM20: 작은 접촉(실측 손톱)에서만 peak 보조 경로를 연다. 0=면적 게이트 끔.
   float peakAreaMax;
+  // VCM21: mode 4의 상/하 버클링 방향. 0=누른 쪽, 1=반대쪽.
+  int   directionInvert;
+  // VCM22: asymmetric directional pulse immediately after mode 4 buckling.
+  float dirPulseAmp;     // 0..1000, 1000 = duty 1.0
+  int   dirPulseAttack;  // fast travel toward the selected direction (ms)
+  int   dirPulseReturn;  // slow return to neutral (ms)
 };
 
 // set/get이 보는 표의 한 줄. f와 i 중 하나만 채운다 (f != nullptr 이면 float).

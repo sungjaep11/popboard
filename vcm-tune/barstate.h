@@ -22,6 +22,12 @@ struct ContactState {
   // 않았는데 키가 풀렸다 다시 눌린다. 한 번 버클링한 키는 뗄 때까지
   // "누른 순간의 뻣뻣함"을 유지해야 한다.
   float heldEdge;
+  // mode 4에서 버클링 순간의 상/하 방향을 릴리스까지 유지한다.
+  // -1=위쪽 구동, +1=아래쪽 구동. 누른 채 중심을 지나도 방향은 안 바뀐다.
+  float heldDirection;
+  // Mode 4 asymmetric pulse state, consumed by the output ISR.
+  unsigned long dirPulseT0;
+  float dirPulseDirection;
 
   // ── 갭 장전 차단 (armed) ────────────────────────────────────────────────
   // 갭에서 쌓은 힘을 키에 통째로 넘기지 않는다. 갭 -> 키 진입 순간의
