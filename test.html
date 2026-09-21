@@ -141,6 +141,15 @@
   button.danger:hover{border-color:var(--bad)}
   button.on{background:var(--accent);border-color:var(--accent);color:#0e1116;font-weight:700}
 
+  .bandbox{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:10px 11px;margin-bottom:14px}
+  .bandbox h3{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin:0 0 8px;font-weight:600}
+  .bandcfg{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;align-items:end}
+  .bandfield{display:grid;gap:3px;font-size:10.5px;color:var(--dim)}
+  .bandfield input{font:inherit;font-size:12px;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:5px;padding:5px 7px;width:100%}
+  .bandmode{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+  .bandactions{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px;align-items:center}
+  .band-pos.off{opacity:.35}
+
   .modes{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-bottom:14px}
   .mode{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:9px 11px;cursor:pointer}
   .mode:hover{border-color:var(--dim)}
@@ -287,7 +296,7 @@
   <div class="trow">
     <button id="t-connect">기기 연결</button>
     <span class="tstat" id="t-status">미연결</span>
-    <button id="t-band-connect">밴드 연결</button>
+    <button id="t-band-connect">밴드 상태 확인</button>
     <span class="tstat" id="t-band-status">미연결</span>
     <button id="t-band-invert">밴드 방향 반전: OFF</button>
     <button id="t-get">기기에서 읽기</button>
@@ -301,6 +310,62 @@
     <button id="t-vibhold">계속 울리기</button>
     <div class="sep"></div>
     <button id="t-hid" class="danger">HID 타이핑 끄기</button>
+  </div>
+
+  <div class="bandbox">
+    <h3>손목 밴드 설정 · 변경 즉시 전송</h3>
+    <div class="bandcfg">
+      <label class="bandfield">주파수 (Hz)
+        <input type="number" id="t-band-freq" min="24" max="1500" step="1" value="250">
+      </label>
+      <label class="bandfield" id="t-band-amp-wrap">고정 세기 (0–2047)
+        <input type="number" id="t-band-amp" min="0" max="2047" step="1" value="1000">
+      </label>
+      <label class="bandfield" id="t-band-ms-wrap">펄스 시간 (ms)
+        <input type="number" id="t-band-ms" min="1" max="60000" step="1" value="50">
+      </label>
+      <label class="bandfield" id="t-band-cooldown-wrap" title="상시 모드에서 움직임이 없으면 이 시간 후 진동을 끕니다. 다시 움직이면 재개하며, 0이면 자동으로 끄지 않습니다.">
+        쿨타임 · 정지 후 꺼짐 (ms)
+        <input type="number" id="t-band-cooldown" min="0" max="60000" step="1" value="0">
+      </label>
+      <div class="bandfield">시간 방식
+        <div class="bandmode">
+          <button id="t-band-pulse" class="on">펄스</button>
+          <button id="t-band-cont">상시</button>
+        </div>
+      </div>
+    </div>
+    <div class="bandcfg" style="margin-top:9px">
+      <div class="bandfield">진동 시작 조건
+        <div class="bandmode">
+          <button id="t-band-trigger-buckle" class="on">버클링</button>
+          <button id="t-band-trigger-contact">접촉</button>
+        </div>
+      </div>
+      <div class="bandfield">세기 방식
+        <div class="bandmode">
+          <button id="t-band-amp-fixed" class="on">고정</button>
+          <button id="t-band-amp-position">위치 비례</button>
+        </div>
+      </div>
+      <label class="bandfield band-pos">중앙 경계 세기
+        <input type="number" id="t-band-center-amp" min="0" max="2047" step="1" value="0">
+      </label>
+      <label class="bandfield band-pos">모서리 세기
+        <input type="number" id="t-band-edge-amp" min="0" max="2047" step="1" value="1000">
+      </label>
+      <label class="bandfield band-pos">세기 곡선
+        <input type="number" id="t-band-curve" min="0.05" max="10" step="0.05" value="1">
+      </label>
+      <label class="bandfield">중앙 데드밴드 (0–0.95)
+        <input type="number" id="t-band-deadband" min="0" max="0.95" step="0.01" value="0.47">
+      </label>
+    </div>
+    <div class="bandactions">
+      <button id="t-band-test">테스트 (왼손 위)</button>
+      <button id="t-band-stop" class="danger">밴드 정지</button>
+      <span class="hint">접촉+상시는 손가락 위치에 따라 방향과 세기가 바뀜 · 쿨타임 동안 움직임이 없으면 정지, 다시 움직이면 재개 (0: 자동 정지 안 함)</span>
+    </div>
   </div>
 
   <div class="modes" id="t-modes"></div>
@@ -1177,7 +1242,7 @@ updateLogUI();
    프로토콜은 vcm-tune.ino 헤더 참고:
      보내기 : set <name> <v> / get / defaults <0|1|2|3|4> / save / load / hid <0|1>
      받기   : #cfg #ok #err #probe #rel #tel #hid #band
-              (#band hand=L|R mask=1|2|4|8 를 연결된 MKR1000으로 전달)
+              (Teensy 연결 시 밴드 설정도 실시간 적용 · 설정은 이 브라우저에 저장 후 재연결 시 복원)
 
    기기가 없어도 값 편집과 #define 스니펫 생성은 그대로 동작한다.
    ══════════════════════════════════════════════════════════════════════════════ */
@@ -1618,10 +1683,21 @@ function saveLast(){
 /* ── Web Serial ───────────────────────────────────────────────────────────────*/
 let port = null, writer = null, reader = null, rxBuf = '';
 let keepReading = false, readDone = null;
-let bandPort = null, bandWriter = null, bandReader = null, bandRxBuf = '';
-let bandKeepReading = false, bandReadDone = null;
-let bandWriteChain = Promise.resolve();
+let bandControlReady = false;
 let bandDirectionInverted = localStorage.getItem('bandDirectionInverted') === '1';
+let bandSettings = {
+  freq:250, amp:1000, ms:50, cooldown:0, mode:'pulse',
+  trigger:'buckling', ampMode:'fixed', centerAmp:0, edgeAmp:1000,
+  curve:1.0, deadband:0.47
+};
+try { bandSettings = Object.assign(bandSettings, JSON.parse(localStorage.getItem('bandSettings') || '{}')); } catch(e) {}
+let bandSettingsTimer = null;
+const bandPendingSettings = new Map();
+
+const bandLive = {
+  buckling:{L:null, R:null},
+  contact:{L:null, R:null}
+};
 const enc = new TextEncoder();
 
 function status(txt, cls){
@@ -1647,6 +1723,68 @@ function syncBandInvertButton(){
 function invertBandMask(mask){
   return ((mask & 1) ? 4 : 0) | ((mask & 2) ? 8 : 0) |
          ((mask & 4) ? 1 : 0) | ((mask & 8) ? 2 : 0);
+}
+
+function syncBandSettingsUI(){
+  $('t-band-freq').value = bandSettings.freq;
+  $('t-band-amp').value = bandSettings.amp;
+  $('t-band-ms').value = bandSettings.ms;
+  $('t-band-cooldown').value = bandSettings.cooldown;
+  $('t-band-center-amp').value = bandSettings.centerAmp;
+  $('t-band-edge-amp').value = bandSettings.edgeAmp;
+  $('t-band-curve').value = bandSettings.curve;
+  $('t-band-deadband').value = bandSettings.deadband;
+  const continuous = bandSettings.mode === 'continuous';
+  $('t-band-pulse').classList.toggle('on', !continuous);
+  $('t-band-cont').classList.toggle('on', continuous);
+  $('t-band-ms').disabled = continuous;
+  $('t-band-ms-wrap').style.opacity = continuous ? '.42' : '1';
+  $('t-band-cooldown').disabled = !continuous;
+  $('t-band-cooldown-wrap').style.opacity = continuous ? '1' : '.42';
+  const contact = bandSettings.trigger === 'contact';
+  $('t-band-trigger-buckle').classList.toggle('on', !contact);
+  $('t-band-trigger-contact').classList.toggle('on', contact);
+  const position = bandSettings.ampMode === 'position';
+  $('t-band-amp-fixed').classList.toggle('on', !position);
+  $('t-band-amp-position').classList.toggle('on', position);
+  $('t-band-amp-wrap').style.opacity = position ? '.35' : '1';
+  document.querySelectorAll('.band-pos').forEach(el => el.classList.toggle('off', !position));
+}
+
+function saveBandSettings(){
+  try { localStorage.setItem('bandSettings', JSON.stringify(bandSettings)); } catch(e) {}
+}
+
+function sendAllBandSettings(settings = bandSettings){
+  for (const [name, value] of Object.entries(settings)) queueBandSetting(name, value);
+  queueBandSetting('invert', bandDirectionInverted ? 1 : 0);
+}
+
+function flushBandSettings(){
+  if (bandSettingsTimer) clearTimeout(bandSettingsTimer);
+  bandSettingsTimer = null;
+  if (!writer || !bandControlReady) return;
+  bandPendingSettings.forEach((value, name) => write('bandset ' + name + ' ' + value));
+  bandPendingSettings.clear();
+}
+
+function queueBandSetting(name, value){
+  if (name !== 'invert') bandSettings[name] = value;
+  saveBandSettings();
+  bandPendingSettings.set(name, value);
+  if (bandSettingsTimer) clearTimeout(bandSettingsTimer);
+  bandSettingsTimer = setTimeout(flushBandSettings, 100);
+}
+
+// Diagnostic events are displayed only; Teensy generates all motor commands.
+function updateBandSource(source, hand, mask, edge, state){
+  bandLive[source][hand] = {mask, edge};
+}
+function releaseBandSource(source, hand){ bandLive[source][hand] = null; }
+function refreshContinuousBand(){} // Held feedback is refreshed in firmware.
+function setLocalBandSetting(name, value){
+  queueBandSetting(name, value);
+  syncBandSettingsUI();
 }
 
 // 기기로 마지막에 보낸 값. 기기가 자기 범위로 잘랐는지 에코와 대조하는 데 쓴다.
@@ -1698,7 +1836,7 @@ async function connect(){
     $('t-connect').textContent = '연결 끊기';
     keepReading = true;
     readDone = readLoop();
-    setTimeout(() => { write('set probe 1'); write('get'); }, 120);  // 기기 값으로 UI를 맞춘다
+    setTimeout(() => { if (writer) { write('set probe 1'); write('get'); write('bandstatus'); } }, 120);  // 기기 값으로 UI를 맞춘다
                                               // probe는 타건 편심 기록에 필요하다
   } catch(e) {
     port = null;
@@ -1708,6 +1846,8 @@ async function connect(){
 }
 
 async function disconnect(){
+  bandControlReady = false;
+  bandStatus('미연결');
   keepReading = false;                                  // 읽기 루프를 먼저 멈춘다
   try { if (reader) await reader.cancel(); } catch(e) {}
   try { await readDone; } catch(e) {}                   // 루프가 락을 놓을 때까지 기다린다
@@ -1719,77 +1859,15 @@ async function disconnect(){
 }
 
 async function connectBand(){
-  if (!('serial' in navigator)) {
-    bandStatus('Web Serial 미지원', 'err');
-    return;
-  }
-  if (bandPort) { await disconnectBand(); return; }
-  try {
-    // 두 번째 선택창에서 Arduino MKR1000을 고른다.
-    bandPort = await navigator.serial.requestPort();
-    await bandPort.open({ baudRate: 115200 });
-    bandWriter = bandPort.writable.getWriter();
-    bandStatus('연결됨', 'on');
-    $('t-band-connect').textContent = '밴드 끊기';
-    bandKeepReading = true;
-    bandReadDone = bandReadLoop();
-    logLine('#ok 밴드 연결됨');
-  } catch(e) {
-    bandPort = null;
-    bandStatus('연결 실패', 'err');
-    logLine('#err band: ' + e.message);
-  }
+  if (!writer) { await connect(); return; }
+  write('bandstatus');
 }
-
-async function disconnectBand(){
-  bandKeepReading = false;
-  try { if (bandReader) await bandReader.cancel(); } catch(e) {}
-  try { await bandReadDone; } catch(e) {}
-  try { if (bandWriter) bandWriter.releaseLock(); } catch(e) {}
-  try { if (bandPort) await bandPort.close(); } catch(e) {}
-  bandPort = bandWriter = bandReader = null; bandReadDone = null;
-  bandWriteChain = Promise.resolve();
-  bandStatus('미연결');
-  $('t-band-connect').textContent = '밴드 연결';
-}
-
 function writeBand(line){
-  if (!bandWriter) {
-    logLine('#err 밴드 미연결 — 안 보냄: ' + line);
-    return;
+  if (!writer || !bandControlReady) {
+    logLine('#err 밴드 제어 미준비 — Teensy 연결 및 펌웨어를 확인하세요.'); return;
   }
-  // 빠른 동시 타건에서도 두 명령의 바이트가 섞이지 않게 순서대로 쓴다.
-  bandWriteChain = bandWriteChain
-    .then(() => bandWriter.write(enc.encode(line + '\n')))
-    .catch(e => logLine('#err band write: ' + e.message));
-}
-
-async function bandReadLoop(){
-  const dec = new TextDecoder();
-  try {
-    while (bandPort && bandPort.readable && bandKeepReading) {
-      bandReader = bandPort.readable.getReader();
-      try {
-        for (;;) {
-          const { value, done } = await bandReader.read();
-          if (done) break;
-          bandRxBuf += dec.decode(value, { stream:true });
-          let i;
-          while ((i = bandRxBuf.indexOf('\n')) >= 0) {
-            const line = bandRxBuf.slice(0, i).replace(/\r$/, '');
-            bandRxBuf = bandRxBuf.slice(i + 1);
-            if (line) logLine('band> ' + line);
-          }
-        }
-      } finally { bandReader.releaseLock(); bandReader = null; }
-    }
-  } catch(e) {
-    bandKeepReading = false;
-    logLine('#err band read: ' + e.message);
-    bandStatus('연결 끊김', 'err');
-    $('t-band-connect').textContent = '밴드 연결';
-    bandPort = bandWriter = null;
-  }
+  flushBandSettings();
+  if (line === 'STOP') write('bandstop');
 }
 
 async function readLoop(){
@@ -1816,7 +1894,7 @@ async function readLoop(){
     logLine('#err read: ' + e.message);
     status('연결 끊김', 'err');
     $('t-connect').textContent = '기기 연결';
-    port = writer = null;
+    port = writer = null; bandControlReady = false; bandStatus('미연결');
   }
 }
 
@@ -1850,14 +1928,61 @@ function adopt(k, raw){
 }
 
 function handleLine(line){
+  if (line === '#band-control version=1') {
+    if (!bandControlReady) {
+      bandControlReady = true;
+      sendAllBandSettings();
+    }
+    return;
+  }
+  if (line.startsWith('#band-direct ')) {
+    const ok = /ready=1(?: |$)/.test(line);
+    bandStatus(ok ? '밴드 연결됨' : '밴드 응답 없음', ok ? 'on' : 'err');
+    logLine(line); return;
+  }
+  if (line.startsWith('#band-param-error')) {
+    bandStatus('설정 오류', 'err'); logLine(line); return;
+  }
+  if (line.startsWith('#band-param ')) { logLine(line); return; }
+
+  if (line.startsWith('#band-contact-release ')) {
+    const kv = kvPairs(line.slice(22));
+    if (kv.hand === 'L' || kv.hand === 'R') releaseBandSource('contact', kv.hand);
+    else logLine('#err 잘못된 band-contact-release 패킷: ' + line);
+    logLine(line);
+    return;
+  }
+  if (line.startsWith('#band-contact ')) {
+    const kv = kvPairs(line.slice(14));
+    if ((kv.hand === 'L' || kv.hand === 'R') && /^[1248]$/.test(kv.mask || '') &&
+        (kv.state === 'down' || kv.state === 'move')) {
+      updateBandSource('contact', kv.hand, parseInt(kv.mask, 10), parseFloat(kv.edge), kv.state);
+    } else logLine('#err 잘못된 band-contact 패킷: ' + line);
+    logLine(line);
+    return;
+  }
+  if (line.startsWith('#band-move ')) {
+    const kv = kvPairs(line.slice(11));
+    if ((kv.hand === 'L' || kv.hand === 'R') && /^[1248]$/.test(kv.mask || '')) {
+      updateBandSource('buckling', kv.hand, parseInt(kv.mask, 10), parseFloat(kv.edge), 'move');
+    } else logLine('#err 잘못된 band-move 패킷: ' + line);
+    logLine(line);
+    return;
+  }
+  if (line.startsWith('#band-release ')) {
+    const kv = kvPairs(line.slice(14));
+    if (kv.hand === 'L' || kv.hand === 'R') releaseBandSource('buckling', kv.hand);
+    else logLine('#err 잘못된 band-release 패킷: ' + line);
+    logLine(line);
+    return;
+  }
   if (line.startsWith('#band ')) {
     const kv = kvPairs(line.slice(6));
     if ((kv.hand === 'L' || kv.hand === 'R') && /^[1248]$/.test(kv.mask || '')) {
       const inputMask = parseInt(kv.mask, 10);
-      const outputMask = bandDirectionInverted ? invertBandMask(inputMask) : inputMask;
-      writeBand('BAND ' + kv.hand + ' ' + outputMask);
+      updateBandSource('buckling', kv.hand, inputMask, parseFloat(kv.edge), 'down');
       if (bandDirectionInverted)
-        logLine('#band-invert hand=' + kv.hand + ' mask=' + inputMask + '->' + outputMask);
+        logLine('#band-invert hand=' + kv.hand + ' mask=' + inputMask + '->' + invertBandMask(inputMask));
     } else {
       logLine('#err 잘못된 band 패킷: ' + line);
     }
@@ -2096,8 +2221,61 @@ $('t-band-invert').onclick = () => {
   bandDirectionInverted = !bandDirectionInverted;
   localStorage.setItem('bandDirectionInverted', bandDirectionInverted ? '1' : '0');
   syncBandInvertButton();
+  queueBandSetting('invert', bandDirectionInverted ? 1 : 0);
   logLine('#ok 밴드 방향 반전 ' + (bandDirectionInverted ? 'ON' : 'OFF'));
 };
+$('t-band-freq').oninput = e => {
+  const v = Math.round(+e.target.value);
+  if (v >= 24 && v <= 1500) queueBandSetting('freq', v);
+};
+$('t-band-amp').oninput = e => {
+  const v = Math.round(+e.target.value);
+  if (v >= 0 && v <= 2047) { queueBandSetting('amp', v); refreshContinuousBand(); }
+};
+$('t-band-ms').oninput = e => {
+  const v = Math.round(+e.target.value);
+  if (v >= 1 && v <= 60000) queueBandSetting('ms', v);
+};
+$('t-band-cooldown').oninput = e => {
+  const v = e.target.valueAsNumber;
+  if (Number.isInteger(v) && v >= 0 && v <= 60000) queueBandSetting('cooldown', v);
+};
+$('t-band-pulse').onclick = () => {
+  bandSettings.mode = 'pulse'; syncBandSettingsUI(); queueBandSetting('mode', 'pulse');
+};
+$('t-band-cont').onclick = () => {
+  bandSettings.mode = 'continuous'; syncBandSettingsUI(); queueBandSetting('mode', 'continuous');
+  setTimeout(refreshContinuousBand, 130);
+};
+$('t-band-trigger-buckle').onclick = () => {
+  writeBand('STOP'); setLocalBandSetting('trigger', 'buckling');
+};
+$('t-band-trigger-contact').onclick = () => {
+  writeBand('STOP'); setLocalBandSetting('trigger', 'contact');
+};
+$('t-band-amp-fixed').onclick = () => setLocalBandSetting('ampMode', 'fixed');
+$('t-band-amp-position').onclick = () => setLocalBandSetting('ampMode', 'position');
+$('t-band-center-amp').oninput = e => {
+  const v = Math.round(+e.target.value);
+  if (v >= 0 && v <= 2047) setLocalBandSetting('centerAmp', v);
+};
+$('t-band-edge-amp').oninput = e => {
+  const v = Math.round(+e.target.value);
+  if (v >= 0 && v <= 2047) setLocalBandSetting('edgeAmp', v);
+};
+$('t-band-curve').oninput = e => {
+  const v = +e.target.value;
+  if (v >= .05 && v <= 10) setLocalBandSetting('curve', v);
+};
+$('t-band-deadband').oninput = e => {
+  const v = +e.target.value;
+  if (v >= 0 && v <= .95) setLocalBandSetting('deadband', v);
+};
+$('t-band-test').onclick = () => {
+  if (!writer || !bandControlReady) { writeBand('TEST'); return; }
+  flushBandSettings(); write('bandtest 0');
+};
+$('t-band-stop').onclick = () => writeBand('STOP');
 $('t-get').onclick      = () => { flushNow(); write('get'); };
 $('t-push').onclick     = () => { flushNow(); pushAll(); };
 $('t-defaults').onclick = () => {
@@ -2177,6 +2355,7 @@ buildParams();
 PARAMS.forEach(p => syncRow(p.k));
 syncHidButton();
 syncBandInvertButton();
+syncBandSettingsUI();
 refreshPresetList();
 setMode(V.mode, true);
 refresh();
