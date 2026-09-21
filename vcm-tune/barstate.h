@@ -13,6 +13,14 @@ struct ContactState {
   // 엉뚱한 키가 릴리즈되고 원래 키는 눌린 채 고착된다. 진짜 키보드처럼
   // "누른 순간의 키"를 뗄 때까지 유지해야 한다.
   int   heldKey;
+  bool  bandActive;    // 이 키다운이 손목 밴드 진동을 시작했는지
+  uint8_t bandMask;    // 마지막으로 보낸 L/U/R/D 방향 비트
+  float bandEdge;      // 마지막으로 보낸 편심(0..1+, 키다운 추적)
+  unsigned long bandLastMs;
+  bool  bandContactActive;   // 버클링 전을 포함한 키캡 접촉 추적
+  uint8_t bandContactMask;
+  float bandContactEdge;
+  unsigned long bandContactLastMs;
   bool  heldByPeak;    // peak 경로로 눌렀으면 peak 히스테리시스로 해제
 
   // 버클링 순간의 키 중심으로부터의 거리(0~1)를 같이 래치한다. 임계힘 배수와

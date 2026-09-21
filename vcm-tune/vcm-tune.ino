@@ -130,6 +130,7 @@
 #include "keymap.h"
 #include "barstate.h"
 #include "params.h"
+#include "direct_band.h"
 
 // Sensel interface //////////////////////////////////////////////////////////////
 USBHost myusb;
@@ -623,6 +624,20 @@ float directionForDy(float dy) {
 // selects exactly one: whichever normalized axis is farther from key center.
 // An exact diagonal tie chooses the horizontal direction.
 //   mask bit 0=L, bit 1=U, bit 2=R, bit 3=D.
+// USB keeps #band diagnostics. The photographed wiring goes to the PCA9685
+// I2C bus, so Teensy owns Wire1 (16=SCL, 17=SDA) directly.
+// Upload band-passive to the MKR1000 before using this build.
+DirectBand directBand;
+bool BAND_DIRECT_TRIGGER_CONTACT = false;  // false=buckling, true=contact
+bool BAND_DIRECT_CONTINUOUS = false;       // false=one pulse per down
+bool BAND_DIRECT_INVERT = false;           // swap L/R and U/D
+bool BAND_DIRECT_POSITION_AMP = false;
+uint16_t BAND_DIRECT_FIXED_AMP = 1000;     // valid range: 0..2047
+uint16_t BAND_DIRECT_CENTER_AMP = 0;
+uint16_t BAND_DIRECT_EDGE_AMP = 1000;
+float BAND_DIRECT_CURVE = 1.0f;
+float BAND_DIRECT_DEADBAND = 0.47f;
+
 uint8_t bandMaskForHit(int key, float offX, float offY) {
   float nx = offX;
   float ny = offY;
@@ -643,12 +658,86 @@ uint8_t bandMaskForHit(int key, float offX, float offY) {
   return ax >= ay ? horizontal : vertical;
 }
 
-void sendBandHit(bool leftHand, int key, float edgeRaw, float offX, float offY) {
-  if (key < 0 || edgeRaw <= P.deadband) return;
+uint8_t directBandMask(uint8_t mask) {
+  if (!BAND_DIRECT_INVERT) return mask;
+  return ((mask & 0x01) ? 0x04 : 0) | ((mask & 0x02) ? 0x08 : 0) |
+         ((mask & 0x04) ? 0x01 : 0) | ((mask & 0x08) ? 0x02 : 0);
+}
+
+uint16_t directBandAmp(float edgeRaw) {
+  if (edgeRaw <= BAND_DIRECT_DEADBAND) return 0;
+  if (!BAND_DIRECT_POSITION_AMP) return BAND_DIRECT_FIXED_AMP;
+
+  float t = (edgeRaw - BAND_DIRECT_DEADBAND) / (1.0f - BAND_DIRECT_DEADBAND);
+  if (t < 0.0f) t = 0.0f;
+  if (t > 1.0f) t = 1.0f;
+  float amp = BAND_DIRECT_CENTER_AMP +
+              (BAND_DIRECT_EDGE_AMP - BAND_DIRECT_CENTER_AMP) * powf(t, BAND_DIRECT_CURVE);
+  if (amp < 0.0f) amp = 0.0f;
+  if (amp > 2047.0f) amp = 2047.0f;
+  return (uint16_t)lroundf(amp);
+}
+
+void sendDirectBandRelease(bool leftHand) {
+  if (BAND_DIRECT_CONTINUOUS) directBand.release(leftHand);
+}
+
+void sendDirectBandSample(bool leftHand, uint8_t mask, float edgeRaw) {
+  uint16_t amp = directBandAmp(edgeRaw);
+  if (amp == 0) {
+    sendDirectBandRelease(leftHand);
+    return;
+  }
+  directBand.hit(leftHand, directBandMask(mask), amp, BAND_DIRECT_CONTINUOUS);
+}
+
+bool sendBandHit(bool leftHand, int key, float edgeRaw, float offX, float offY) {
+  if (key < 0) return false;
+  uint8_t mask = bandMaskForHit(key, offX, offY);
   Serial.print("#band hand=");
   Serial.print(leftHand ? 'L' : 'R');
   Serial.print(" mask=");
-  Serial.println(bandMaskForHit(key, offX, offY));
+  Serial.print(mask);
+  Serial.print(" edge=");
+  Serial.println(edgeRaw, 3);
+  if (!BAND_DIRECT_TRIGGER_CONTACT) sendDirectBandSample(leftHand, mask, edgeRaw);
+  return true;
+}
+
+void sendBandRelease(bool leftHand) {
+  Serial.print("#band-release hand=");
+  Serial.println(leftHand ? 'L' : 'R');
+  if (!BAND_DIRECT_TRIGGER_CONTACT) sendDirectBandRelease(leftHand);
+}
+
+void sendBandMove(bool leftHand, uint8_t mask, float edgeRaw) {
+  Serial.print("#band-move hand=");
+  Serial.print(leftHand ? 'L' : 'R');
+  Serial.print(" mask=");
+  Serial.print(mask);
+  Serial.print(" edge=");
+  Serial.println(edgeRaw, 3);
+  if (!BAND_DIRECT_TRIGGER_CONTACT && BAND_DIRECT_CONTINUOUS)
+    sendDirectBandSample(leftHand, mask, edgeRaw);
+}
+
+void sendBandContact(bool leftHand, uint8_t mask, float edgeRaw, bool down) {
+  Serial.print("#band-contact hand=");
+  Serial.print(leftHand ? 'L' : 'R');
+  Serial.print(" mask=");
+  Serial.print(mask);
+  Serial.print(" edge=");
+  Serial.print(edgeRaw, 3);
+  Serial.print(" state=");
+  Serial.println(down ? "down" : "move");
+  if (BAND_DIRECT_TRIGGER_CONTACT && (down || BAND_DIRECT_CONTINUOUS))
+    sendDirectBandSample(leftHand, mask, edgeRaw);
+}
+
+void sendBandContactRelease(bool leftHand) {
+  Serial.print("#band-contact-release hand=");
+  Serial.println(leftHand ? 'L' : 'R');
+  if (BAND_DIRECT_TRIGGER_CONTACT) sendDirectBandRelease(leftHand);
 }
 
 // 유효 거리 -> 진동 진폭(듀티 0~1). 진동 축이 꺼진 모드에서는 항상 0이다.
@@ -896,12 +985,19 @@ void assignSlots(SideState* s, bool leftSide, int outIdx[SIDE_SLOTS]) {
     // 그 키가 빠진다.
     if (outIdx[k] < 0) {
       probeRelease(&s->c[k]);            // 손가락을 통째로 뗀 경우가 여기다
+      if (s->c[k].bandActive) sendBandRelease(leftSide);
+      if (s->c[k].bandContactActive) sendBandContactRelease(leftSide);
       probeMiss(&s->c[k]);               // 버클링 못 한 채 손을 뗀 경우가 여기다.
                                          // 힘이 문턱 위에 머무른 채 접촉이 사라지면
                                          // 아래 sideDrive() 의 "힘이 빠졌다" 경로가
                                          // 영영 안 걸리므로 여기서도 닫아야 한다.
       s->c[k].activeId = -1; s->c[k].buttonState = 0; s->c[k].prevForce = 0.0f;
       s->c[k].heldByPeak = false;
+      s->c[k].bandActive = false;
+      s->c[k].bandMask = 0;
+      s->c[k].bandEdge = 0.0f; s->c[k].bandLastMs = 0;
+      s->c[k].bandContactActive = false; s->c[k].bandContactMask = 0;
+      s->c[k].bandContactEdge = 0.0f; s->c[k].bandContactLastMs = 0;
       s->c[k].heldKey = -1;  s->c[k].heldEdge = 0.0f; s->c[k].heldDirection = 1.0f;
       s->c[k].dirPulseT0 = 0; s->c[k].dirPulseDirection = 1.0f;
       s->c[k].maxForce = 0.0f; s->c[k].maxPeak = 0.0f;
@@ -965,9 +1061,15 @@ void assignSlots(SideState* s, bool leftSide, int outIdx[SIDE_SLOTS]) {
       int newId = (int)frame.contacts[best].id;
       outIdx[k] = best;
       if (s->c[k].activeId != newId) {
+        if (s->c[k].bandContactActive) sendBandContactRelease(leftSide);
         s->c[k].activeId = newId;
         s->c[k].buttonState = 0; s->c[k].prevForce = 0.0f;
         s->c[k].heldByPeak = false;
+        s->c[k].bandActive = false;
+        s->c[k].bandMask = 0;
+        s->c[k].bandEdge = 0.0f; s->c[k].bandLastMs = 0;
+        s->c[k].bandContactActive = false; s->c[k].bandContactMask = 0;
+        s->c[k].bandContactEdge = 0.0f; s->c[k].bandContactLastMs = 0;
         s->c[k].heldKey = -1; s->c[k].heldEdge = 0.0f; s->c[k].heldDirection = 1.0f;
         s->c[k].dirPulseT0 = 0; s->c[k].dirPulseDirection = 1.0f;
         s->c[k].maxForce = 0.0f; s->c[k].maxPeak = 0.0f;
@@ -1258,7 +1360,68 @@ float sideDrive(SideState* s, const int idx[SIDE_SLOTS], SlotInfo out[SIDE_SLOTS
     out[k].vib = inGap ? vibNow
                        : ((P.vibWhen == 3) ? vibNow * keyContGate : vibNow);
 
-    if (down) sendBandHit(s == &sideL, key, edgeRaw, dxRaw, dyRaw);
+    // ── 손목 밴드용 '접촉만으로 시작' 스트림 ──────────────────────────────
+    // 브라우저가 버클링/접촉 중 어느 스트림을 사용할지 고른다. 접촉 스트림은
+    // 위치가 0.02 이상 변할 때 최대 50Hz로 갱신해 방향뿐 아니라 위치 비례 세기도
+    // 따라갈 수 있게 하면서 USB 로그가 센서 프레임 속도로 폭주하지 않게 한다.
+    bool leftBand = (s == &sideL);
+    unsigned long bandNowMs = millis();
+    if (idx[k] >= 0 && key >= 0) {
+      uint8_t contactMask = bandMaskForHit(key, dxRaw, dyRaw);
+      if (!s->c[k].bandContactActive) {
+        sendBandContact(leftBand, contactMask, edgeRaw, true);
+        s->c[k].bandContactActive = true;
+        s->c[k].bandContactMask = contactMask;
+        s->c[k].bandContactEdge = edgeRaw;
+        s->c[k].bandContactLastMs = bandNowMs;
+      } else {
+        bool directionChanged = contactMask != s->c[k].bandContactMask;
+        bool edgeChanged = fabsf(edgeRaw - s->c[k].bandContactEdge) >= 0.02f;
+        if (directionChanged || (edgeChanged && bandNowMs - s->c[k].bandContactLastMs >= 20)) {
+          sendBandContact(leftBand, contactMask, edgeRaw, false);
+          s->c[k].bandContactMask = contactMask;
+          s->c[k].bandContactEdge = edgeRaw;
+          s->c[k].bandContactLastMs = bandNowMs;
+        }
+      }
+    } else if (s->c[k].bandContactActive) {
+      sendBandContactRelease(leftBand);
+      s->c[k].bandContactActive = false;
+      s->c[k].bandContactMask = 0;
+      s->c[k].bandContactEdge = 0.0f;
+    }
+
+    // 기존 버클링 스트림도 같은 위치 해상도로 갱신한다. 실제 키는 heldKey에
+    // 고정하고 현재 센서 좌표만 다시 재므로, 눌린 채 키 경계를 살짝 넘어도
+    // 최초 키 중심을 기준으로 방향과 세기가 연속적으로 변한다.
+    if (down) {
+      s->c[k].bandActive = sendBandHit(leftBand, key, edgeRaw, dxRaw, dyRaw);
+      s->c[k].bandMask = s->c[k].bandActive ? bandMaskForHit(key, dxRaw, dyRaw) : 0;
+      s->c[k].bandEdge = edgeRaw;
+      s->c[k].bandLastMs = bandNowMs;
+    } else if (s->c[k].buttonState && idx[k] >= 0 && s->c[k].heldKey >= 0) {
+      int heldKey = s->c[k].heldKey;
+      float heldDx = frame.contacts[idx[k]].x_pos - CAL_OX - KEYS[heldKey].cx;
+      float heldDy = frame.contacts[idx[k]].y_pos - CAL_OY - KEYS[heldKey].cy;
+      float heldEdgeNow = keyEdgeOf(heldKey, heldDx, heldDy);
+      uint8_t nextMask = bandMaskForHit(heldKey, heldDx, heldDy);
+      bool directionChanged = nextMask != s->c[k].bandMask;
+      bool edgeChanged = fabsf(heldEdgeNow - s->c[k].bandEdge) >= 0.02f;
+      if (!s->c[k].bandActive || directionChanged ||
+          (edgeChanged && bandNowMs - s->c[k].bandLastMs >= 20)) {
+        sendBandMove(leftBand, nextMask, heldEdgeNow);
+        s->c[k].bandActive = true;
+        s->c[k].bandMask = nextMask;
+        s->c[k].bandEdge = heldEdgeNow;
+        s->c[k].bandLastMs = bandNowMs;
+      }
+    }
+    if (up && s->c[k].bandActive) {
+      sendBandRelease(leftBand);
+      s->c[k].bandActive = false;
+      s->c[k].bandMask = 0;
+      s->c[k].bandEdge = 0.0f;
+    }
 
     if (P.probe && !prevBS && s->c[k].buttonState) {
       Serial.print("#probe key=");
@@ -1508,6 +1671,20 @@ void vibISR() {
 // (예: 임계를 올린 순간 이미 버클링한 접촉이 릴리즈 임계 위에 떠 버린다)
 // 전부 풀고 다시 쌓게 한다. 손가락이 올라가 있어도 다음 프레임에 복구된다.
 void resetBuckling() {
+  // 설정 변경으로 눌림 상태를 초기화할 때도 상시 밴드가 남지 않게 한다.
+  bool releaseLeft = false, releaseRight = false;
+  bool releaseContactLeft = false, releaseContactRight = false;
+  for (int k = 0; k < SIDE_SLOTS; k++) {
+    releaseLeft  |= sideL.c[k].bandActive;
+    releaseRight |= sideR.c[k].bandActive;
+    releaseContactLeft  |= sideL.c[k].bandContactActive;
+    releaseContactRight |= sideR.c[k].bandContactActive;
+  }
+  if (releaseLeft)  sendBandRelease(true);
+  if (releaseRight) sendBandRelease(false);
+  if (releaseContactLeft)  sendBandContactRelease(true);
+  if (releaseContactRight) sendBandContactRelease(false);
+
   // vibISR()이 같은 vibT0/vibPhase/vibTest*를 읽고 PWM을 쓴다. 통째로 막는다.
   noInterrupts();
   SideState* sides[2] = { &sideL, &sideR };
@@ -1515,6 +1692,14 @@ void resetBuckling() {
     for (int k = 0; k < SIDE_SLOTS; k++) {
       sides[s]->c[k].buttonState = 0;
       sides[s]->c[k].heldByPeak  = false;
+      sides[s]->c[k].bandActive  = false;
+      sides[s]->c[k].bandMask    = 0;
+      sides[s]->c[k].bandEdge    = 0.0f;
+      sides[s]->c[k].bandLastMs  = 0;
+      sides[s]->c[k].bandContactActive = false;
+      sides[s]->c[k].bandContactMask = 0;
+      sides[s]->c[k].bandContactEdge = 0.0f;
+      sides[s]->c[k].bandContactLastMs = 0;
       sides[s]->c[k].heldKey     = -1;
       sides[s]->c[k].heldEdge    = 0.0f;
       sides[s]->c[k].heldDirection = 1.0f;
@@ -1782,6 +1967,52 @@ void loadFromEeprom(bool quiet) {
   if (!quiet) { Serial.println("#ok loaded"); printCfg(); }
 }
 
+// Refresh held feedback after a setting edit without a PC event bridge.
+void refreshDirectBand() {
+  directBand.release(true); directBand.release(false);
+  if (!BAND_DIRECT_CONTINUOUS) return;
+  SideState* sides[] = {&sideL, &sideR};
+  for (int hand = 0; hand < 2; ++hand) {
+    for (int k = 0; k < SIDE_SLOTS; ++k) {
+      ContactState& c = sides[hand]->c[k];
+      bool active = BAND_DIRECT_TRIGGER_CONTACT ? c.bandContactActive : c.bandActive;
+      if (active) sendDirectBandSample(hand == 0,
+        BAND_DIRECT_TRIGGER_CONTACT ? c.bandContactMask : c.bandMask,
+        BAND_DIRECT_TRIGGER_CONTACT ? c.bandContactEdge : c.bandEdge);
+    }
+  }
+}
+
+bool setBandParam(const char* name, const char* value) {
+  if (!name || !value) return false;
+  if (ieq(name, "mode")) {
+    if (!ieq(value,"pulse") && !ieq(value,"continuous")) return false;
+    BAND_DIRECT_CONTINUOUS = ieq(value,"continuous");
+  } else if (ieq(name,"trigger")) {
+    if (!ieq(value,"buckling") && !ieq(value,"contact")) return false;
+    BAND_DIRECT_TRIGGER_CONTACT = ieq(value,"contact");
+  } else if (ieq(name,"ampMode")) {
+    if (!ieq(value,"fixed") && !ieq(value,"position")) return false;
+    BAND_DIRECT_POSITION_AMP = ieq(value,"position");
+  } else {
+    char* end;
+    float v = strtof(value, &end);
+    if (end == value || *end || !isfinite(v)) return false;
+    if (ieq(name,"freq") && v >= 24 && v <= 1500) directBand.setFrequency((uint16_t)v);
+    else if (ieq(name,"ms") && v >= 1 && v <= 60000) directBand.duration = (uint32_t)v;
+    else if (ieq(name,"cooldown") && v >= 0 && v <= 60000) directBand.cooldown = (uint32_t)v;
+    else if (ieq(name,"amp") && v >= 0 && v <= 2047) BAND_DIRECT_FIXED_AMP = (uint16_t)v;
+    else if (ieq(name,"centerAmp") && v >= 0 && v <= 2047) BAND_DIRECT_CENTER_AMP = (uint16_t)v;
+    else if (ieq(name,"edgeAmp") && v >= 0 && v <= 2047) BAND_DIRECT_EDGE_AMP = (uint16_t)v;
+    else if (ieq(name,"curve") && v >= .05f && v <= 10) BAND_DIRECT_CURVE = v;
+    else if (ieq(name,"deadband") && v >= 0 && v <= .95f) BAND_DIRECT_DEADBAND = v;
+    else if (ieq(name,"invert") && (v == 0 || v == 1)) BAND_DIRECT_INVERT = v != 0;
+    else return false;
+  }
+  refreshDirectBand();
+  return true;
+}
+
 void handleCommand(char* line) {
   while (*line == ' ') line++;
   if (!*line) return;
@@ -1791,7 +2022,28 @@ void handleCommand(char* line) {
   char* a1  = strtok(nullptr, " \t");
   char* a2  = strtok(nullptr, " \t");
 
-  if (ieq(cmd, "set") || ieq(cmd, "s")) {
+  if (ieq(cmd, "bandset")) {
+    if (!setBandParam(a1, a2)) Serial.println("#band-param-error invalid-setting");
+    else {
+      Serial.print("#band-param "); Serial.print(a1); Serial.print(' '); Serial.println(a2);
+    }
+  }
+  else if (ieq(cmd, "bandstatus")) {
+    Serial.println("#band-control version=1");
+    directBand.status();
+  }
+  else if (ieq(cmd, "bandstop")) {
+    directBand.release(true);
+    directBand.release(false);
+  }
+  else if (ieq(cmd, "bandtest")) {
+    if (!a1 || a2 || a1[0] < '0' || a1[0] > '7' || a1[1]) {
+      Serial.println("#err usage: bandtest <0..7>"); return;
+    }
+    directBand.test(a1[0] - '0', directBandAmp(1.0f));
+    directBand.status();
+  }
+  else if (ieq(cmd, "set") || ieq(cmd, "s")) {
     if (!a1 || !a2) { Serial.println("#err usage: set <name> <value>"); return; }
     if (!setParam(a1, atof(a2))) { Serial.print("#err unknown param "); Serial.println(a1); }
   }
@@ -1931,6 +2183,7 @@ elapsedMillis loopTimer;
 
 void setup() {
   Serial.begin(115200);
+  directBand.begin();
   while (!Serial && millis() < 3000);
 
   applyDefaults(2);            // EEPROM이 없을 때는 test.html의 force-8 튜닝값
@@ -1946,6 +2199,14 @@ void setup() {
     sideL.c[k].buttonState = 0; sideL.c[k].prevForce = 0.0f; sideL.c[k].activeId = -1;
     sideR.c[k].buttonState = 0; sideR.c[k].prevForce = 0.0f; sideR.c[k].activeId = -1;
     sideL.c[k].heldByPeak = false; sideR.c[k].heldByPeak = false;
+    sideL.c[k].bandActive = false; sideR.c[k].bandActive = false;
+    sideL.c[k].bandMask = 0;       sideR.c[k].bandMask = 0;
+    sideL.c[k].bandEdge = 0.0f;    sideR.c[k].bandEdge = 0.0f;
+    sideL.c[k].bandLastMs = 0;     sideR.c[k].bandLastMs = 0;
+    sideL.c[k].bandContactActive = false; sideR.c[k].bandContactActive = false;
+    sideL.c[k].bandContactMask = 0;       sideR.c[k].bandContactMask = 0;
+    sideL.c[k].bandContactEdge = 0.0f;    sideR.c[k].bandContactEdge = 0.0f;
+    sideL.c[k].bandContactLastMs = 0;     sideR.c[k].bandContactLastMs = 0;
     sideL.c[k].heldKey = -1;    sideR.c[k].heldKey = -1;
     missClear(&sideL.c[k]);     missClear(&sideR.c[k]);
     sideL.c[k].missArmed = true; sideR.c[k].missArmed = true;
@@ -1998,6 +2259,7 @@ void setup() {
 // 클릭 값(gDriveL/R)은 여전히 loopPeriod 주기로만 갱신된다. 그건 원래 그랬고
 // (센서가 200Hz다), ISR은 그 위에 진동만 얹어서 내보낸다.
 void loop() {
+  directBand.service();
   if (loopTimer >= (unsigned long)P.loopPeriod) {
     loopTimer = 0;
     frameStep();
